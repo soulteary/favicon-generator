@@ -6,6 +6,8 @@ replace github.com/willnorris/gifresize => ./pkg/willnorris/gifresize
 
 replace github.com/willnorris/imageproxy => ./pkg/willnorris/imageproxy
 
+replace github.com/nfnt/resize => ./pkg/nfnt/resize
+
 require (
 	github.com/die-net/lrucache v0.0.0-20220628165024-20a71bc65bf1
 	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79
