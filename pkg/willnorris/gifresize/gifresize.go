@@ -20,7 +20,7 @@
 // individually may cause problems due to aliasing of transparent pixels. This
 // package tries to avoid this by building frames from all previous frames and
 // resizing the frames as RGB.
-package gifresize // import "willnorris.com/go/gifresize"
+package gifresize // import "github.com/willnorris/gifresize"
 
 import (
 	"image"

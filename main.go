@@ -19,8 +19,8 @@ import (
 	"github.com/die-net/lrucache/twotier"
 	"github.com/gregjones/httpcache/diskcache"
 	"github.com/peterbourgon/diskv"
-	"willnorris.com/go/imageproxy"
-	"willnorris.com/go/imageproxy/third_party/envy"
+	"github.com/willnorris/imageproxy"
+	"github.com/willnorris/imageproxy/third_party/envy"
 )
 
 const defaultMemorySize = 100
