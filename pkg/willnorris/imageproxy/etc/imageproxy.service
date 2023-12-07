@@ -1,0 +1,12 @@
+[Unit]
+Description=Image Proxy
+
+[Service]
+User=www-data
+ExecStart=/usr/local/bin/imageproxy \
+    -addr localhost:4593 \
+    -cache memory -cache /var/cache/imageproxy 
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
