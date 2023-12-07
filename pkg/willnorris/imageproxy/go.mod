@@ -14,6 +14,8 @@ require (
 
 require github.com/nfnt/resize v0.0.0-00010101000000-000000000000 // indirect
 
+replace github.com/disintegration/imaging => ../../disintegration/imaging
+
 replace github.com/nfnt/resize => ../../nfnt/resize
 
 replace github.com/rwcarlsen/goexif => ../../rwcarlsen/goexif
