@@ -18,4 +18,6 @@ replace github.com/nfnt/resize => ../../nfnt/resize
 
 replace github.com/rwcarlsen/goexif => ../../rwcarlsen/goexif
 
+replace github.com/muesli/smartcrop => ../../muesli/smartcrop
+
 replace github.com/willnorris/gifresize => ../gifresize
