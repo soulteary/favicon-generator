@@ -36,23 +36,6 @@ type Proxy struct {
 	Client *http.Client // client used to fetch remote URLs
 	Cache  Cache        // cache used to cache responses
 
-	// AllowHosts specifies a list of remote hosts that images can be
-	// proxied from.  An empty list means all hosts are allowed.
-	AllowHosts []string
-
-	// DenyHosts specifies a list of remote hosts that images cannot be
-	// proxied from.
-	DenyHosts []string
-
-	// Referrers, when given, requires that requests to the image
-	// proxy come from a referring host. An empty list means all
-	// hosts are allowed.
-	Referrers []string
-
-	// IncludeReferer controls whether the original Referer request header
-	// is included in remote requests.
-	IncludeReferer bool
-
 	// FollowRedirects controls whether imageproxy will follow redirects or not.
 	FollowRedirects bool
 
@@ -63,10 +46,6 @@ type Proxy struct {
 
 	// The Logger used by the image proxy
 	Logger *log.Logger
-
-	// SignatureKeys is a list of HMAC keys used to verify signed requests.
-	// Any of them can be used to verify signed requests.
-	SignatureKeys [][]byte
 
 	// Allow images to scale beyond their original dimensions.
 	ScaleUp bool
@@ -82,9 +61,6 @@ type Proxy struct {
 	// ContentTypes specifies a list of content types to allow. An empty
 	// list means all content types are allowed.
 	ContentTypes []string
-
-	// The User-Agent used by imageproxy when requesting origin image
-	UserAgent string
 
 	// PassRequestHeaders identifies HTTP headers to pass from inbound
 	// requests to the proxied server.
@@ -155,25 +131,12 @@ func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := p.allowed(req); err != nil {
-		p.logf("%s: %v", err, req)
-		http.Error(w, msgNotAllowed, http.StatusForbidden)
-		return
-	}
-
 	// assign static settings from proxy to req.Options
 	req.Options.ScaleUp = p.ScaleUp
 
 	actualReq, _ := http.NewRequest("GET", req.String(), nil)
-	if p.UserAgent != "" {
-		actualReq.Header.Set("User-Agent", p.UserAgent)
-	}
 	if len(p.ContentTypes) != 0 {
 		actualReq.Header.Set("Accept", strings.Join(p.ContentTypes, ", "))
-	}
-	if p.IncludeReferer {
-		// pass along the referer header from the original request
-		copyHeader(actualReq.Header, r.Header, "referer")
 	}
 	if len(p.PassRequestHeaders) != 0 {
 		copyHeader(actualReq.Header, r.Header, p.PassRequestHeaders...)
@@ -186,10 +149,6 @@ func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 					p.logf("followed too many redirects (%d).", len(via))
 				}
 				return errTooManyRedirects
-			}
-			if hostMatches(p.DenyHosts, newreq.URL) {
-				http.Error(w, msgNotAllowedInRedirect, http.StatusForbidden)
-				return errNotAllowed
 			}
 			return nil
 		}
@@ -284,43 +243,9 @@ func copyHeader(dst, src http.Header, headerNames ...string) {
 }
 
 var (
-	errReferrer         = errors.New("request does not contain an allowed referrer")
-	errDeniedHost       = errors.New("request contains a denied host")
-	errNotAllowed       = errors.New("request does not contain an allowed host or valid signature")
 	errTooManyRedirects = errors.New("too many redirects")
-
-	msgNotAllowed           = "requested URL is not allowed"
-	msgNotAllowedInRedirect = "requested URL in redirect is not allowed"
+	msgNotAllowed       = "requested URL is not allowed"
 )
-
-// allowed determines whether the specified request contains an allowed
-// referrer, host, and signature.  It returns an error if the request is not
-// allowed.
-func (p *Proxy) allowed(r *Request) error {
-	if len(p.Referrers) > 0 && !referrerMatches(p.Referrers, r.Original) {
-		return errReferrer
-	}
-
-	if hostMatches(p.DenyHosts, r.URL) {
-		return errDeniedHost
-	}
-
-	if len(p.AllowHosts) == 0 && len(p.SignatureKeys) == 0 {
-		return nil // no allowed hosts or signature key, all requests accepted
-	}
-
-	if len(p.AllowHosts) > 0 && hostMatches(p.AllowHosts, r.URL) {
-		return nil
-	}
-
-	for _, signatureKey := range p.SignatureKeys {
-		if len(signatureKey) > 0 && validSignature(signatureKey, r) {
-			return nil
-		}
-	}
-
-	return errNotAllowed
-}
 
 // contentTypeMatches returns whether contentType matches one of the allowed patterns.
 func contentTypeMatches(patterns []string, contentType string) bool {

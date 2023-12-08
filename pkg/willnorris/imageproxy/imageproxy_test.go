@@ -86,87 +86,6 @@ func TestCopyHeader(t *testing.T) {
 	}
 }
 
-func TestAllowed(t *testing.T) {
-	allowHosts := []string{"good"}
-	key := [][]byte{
-		[]byte("c0ffee"),
-	}
-	multipleKey := [][]byte{
-		[]byte("c0ffee"),
-		[]byte("beer"),
-	}
-
-	genRequest := func(headers map[string]string) *http.Request {
-		req := &http.Request{Header: make(http.Header)}
-		for key, value := range headers {
-			req.Header.Set(key, value)
-		}
-		return req
-	}
-
-	tests := []struct {
-		url        string
-		options    Options
-		allowHosts []string
-		denyHosts  []string
-		referrers  []string
-		keys       [][]byte
-		request    *http.Request
-		allowed    bool
-	}{
-		// no allowHosts or signature key
-		{"http://test/image", emptyOptions, nil, nil, nil, nil, nil, true},
-
-		// allowHosts
-		{"http://good/image", emptyOptions, allowHosts, nil, nil, nil, nil, true},
-		{"http://bad/image", emptyOptions, allowHosts, nil, nil, nil, nil, false},
-
-		// referrer
-		{"http://test/image", emptyOptions, nil, nil, allowHosts, nil, genRequest(map[string]string{"Referer": "http://good/foo"}), true},
-		{"http://test/image", emptyOptions, nil, nil, allowHosts, nil, genRequest(map[string]string{"Referer": "http://bad/foo"}), false},
-		{"http://test/image", emptyOptions, nil, nil, allowHosts, nil, genRequest(map[string]string{"Referer": "MALFORMED!!"}), false},
-		{"http://test/image", emptyOptions, nil, nil, allowHosts, nil, genRequest(map[string]string{}), false},
-
-		// signature key
-		{"http://test/image", Options{Signature: "NDx5zZHx7QfE8E-ijowRreq6CJJBZjwiRfOVk_mkfQQ="}, nil, nil, nil, key, nil, true},
-		{"http://test/image", Options{Signature: "NDx5zZHx7QfE8E-ijowRreq6CJJBZjwiRfOVk_mkfQQ="}, nil, nil, nil, multipleKey, nil, true}, // signed with key "c0ffee"
-		{"http://test/image", Options{Signature: "FWIawYV4SEyI4zKJMeGugM-eJM1eI_jXPEQ20ZgRe4A="}, nil, nil, nil, multipleKey, nil, true}, // signed with key "beer"
-		{"http://test/image", Options{Signature: "deadbeef"}, nil, nil, nil, key, nil, false},
-		{"http://test/image", Options{Signature: "deadbeef"}, nil, nil, nil, multipleKey, nil, false},
-		{"http://test/image", emptyOptions, nil, nil, nil, key, nil, false},
-
-		// allowHosts and signature
-		{"http://good/image", emptyOptions, allowHosts, nil, nil, key, nil, true},
-		{"http://bad/image", Options{Signature: "gWivrPhXBbsYEwpmWAKjbJEiAEgZwbXbltg95O2tgNI="}, nil, nil, nil, key, nil, true},
-		{"http://bad/image", emptyOptions, allowHosts, nil, nil, key, nil, false},
-
-		// deny requests that match denyHosts, even if signature is valid or also matches allowHosts
-		{"http://test/image", emptyOptions, nil, []string{"test"}, nil, nil, nil, false},
-		{"http://test:3000/image", emptyOptions, nil, []string{"test"}, nil, nil, nil, false},
-		{"http://test/image", emptyOptions, []string{"test"}, []string{"test"}, nil, nil, nil, false},
-		{"http://test/image", Options{Signature: "NDx5zZHx7QfE8E-ijowRreq6CJJBZjwiRfOVk_mkfQQ="}, nil, []string{"test"}, nil, key, nil, false},
-		{"http://127.0.0.1/image", emptyOptions, nil, []string{"127.0.0.0/8"}, nil, nil, nil, false},
-		{"http://127.0.0.1:3000/image", emptyOptions, nil, []string{"127.0.0.0/8"}, nil, nil, nil, false},
-	}
-
-	for _, tt := range tests {
-		p := NewProxy(nil, nil)
-		p.AllowHosts = tt.allowHosts
-		p.DenyHosts = tt.denyHosts
-		p.SignatureKeys = tt.keys
-		p.Referrers = tt.referrers
-
-		u, err := url.Parse(tt.url)
-		if err != nil {
-			t.Errorf("error parsing url %q: %v", tt.url, err)
-		}
-		req := &Request{u, tt.options, tt.request}
-		if got, want := p.allowed(req), tt.allowed; (got == nil) != want {
-			t.Errorf("allowed(%q) returned %v, want %v.\nTest struct: %#v", req, got, want, tt)
-		}
-	}
-}
-
 func TestHostMatches(t *testing.T) {
 	hosts := []string{"a.test", "*.b.test", "*c.test"}
 
@@ -373,7 +292,6 @@ func TestProxy_ServeHTTP(t *testing.T) {
 		Client: &http.Client{
 			Transport: testTransport{},
 		},
-		AllowHosts:   []string{"good.test"},
 		ContentTypes: []string{"image/*"},
 	}
 
