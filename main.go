@@ -17,8 +17,6 @@ import (
 
 	"github.com/die-net/lrucache"
 	"github.com/die-net/lrucache/twotier"
-	"github.com/gregjones/httpcache/diskcache"
-	"github.com/peterbourgon/diskv"
 	"github.com/willnorris/imageproxy"
 	"github.com/willnorris/imageproxy/third_party/envy"
 )
@@ -158,15 +156,7 @@ func parseCache(c string) (imageproxy.Cache, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing cache flag: %w", err)
 	}
-
-	switch u.Scheme {
-	case "memory":
-		return lruCache(u.Opaque)
-	case "file":
-		return diskCache(u.Path), nil
-	default:
-		return diskCache(c), nil
-	}
+	return lruCache(u.Opaque)
 }
 
 // lruCache creates an LRU Cache with the specified options of the form
@@ -187,14 +177,4 @@ func lruCache(options string) (*lrucache.LruCache, error) {
 	}
 
 	return lrucache.New(size*1e6, int64(age.Seconds())), nil
-}
-
-func diskCache(path string) *diskcache.Cache {
-	d := diskv.New(diskv.Options{
-		BasePath: path,
-
-		// For file "c0ffee", store file as "c0/ff/c0ffee"
-		Transform: func(s string) []string { return []string{s[0:2], s[2:4]} },
-	})
-	return diskcache.NewWithDiskv(d)
 }
