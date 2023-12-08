@@ -20,6 +20,8 @@ replace github.com/gregjones/httpcache => ./pkg/gregjones/httpcache
 
 replace github.com/bradfitz/gomemcache => ./pkg/bradfitz/gomemcache
 
+replace github.com/die-net/lrucache => ./pkg/die-net/lrucache
+
 require (
 	github.com/die-net/lrucache v0.0.0-20220628165024-20a71bc65bf1
 	github.com/willnorris/imageproxy v0.0.0-00010101000000-000000000000
