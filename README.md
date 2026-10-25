@@ -155,6 +155,37 @@ overflow. An omitted or zero age disables expiration; positive fractional
 seconds are rounded up to whole seconds. Unsupported backends, negative ages
 and malformed cache specifications are rejected.
 
+Finished PNG, ICO and ZIP artifacts have a separate opt-in cache:
+
+```sh
+go run . -cache memory:100:1h -artifactCache memory
+```
+
+`-artifactCache` defaults to `off`. The memory backend uses httpcache-kit/v4
+with a 64 MiB payload/header capacity (`-artifactCacheBytes`), a 20 MiB per-entry
+body limit (`-artifactCacheEntryBytes`, also capped by `-maxResponseBytes`) and a
+five-minute TTL (`-artifactCacheTTL`, at most 24 hours). Capacity must fit one
+effective entry plus its envelope and fixed headers. These flags follow the
+same CLI/environment precedence as the other options. Payload capacity is not
+a process RSS limit: bounded per-operation copies, index overhead, source
+buffers and admitted response buffers also use memory.
+
+Every lookup runs after source authorization, download and image-budget checks.
+Only explicitly public, fresh sources are eligible; private/no-store/no-cache
+responses, cookies and unsupported variants bypass this cache. Keys bind the
+source identity, actual content, output product, applicable names and budgets.
+An entry never outlives the source's sharing horizon. Standalone manifests and
+errors are not cached. Concurrent identical misses share a synchronous fill;
+canceled leaders release waiters to retry within their own request deadlines.
+Memory resources close after server drain; no files or background fill workers
+are created. Download responses remain `private, no-store` on cache hits.
+
+The private management registry exports
+`favicon_generator_artifact_cache_requests_total` with fixed `backend` and
+`result` (`hit`, `miss`, `bypass`, `error`) labels. Backend failures fail open to
+normal generation unless the request itself was canceled. Current image-budget
+violations are rejected, including on cache hits.
+
 Numeric bounds and the normalized log-level enum use cli-kit v1.9.2 validators.
 The standard-library `flag.FlagSet` still parses only the winning CLI/ENV source;
 explicit `false` and empty values retain their meaning. Validator errors are
@@ -306,9 +337,10 @@ Run deterministic cold/warm handler benchmarks with cached Go dependencies:
 They cover legacy PNG, one icon PNG, ZIP, and the browser's six serial previews
 followed by ZIP. Results include time, allocations, upstream fetches and cache
 Get hits per operation, plus times from the six production stage histograms.
-Warm source caching avoids refetching, while icon
-requests still repeat decoding and encoding because icon outputs are not
-cached. See [benchmark methodology and commands](docs/benchmarks.md). The script
+With the default artifact cache disabled, warm source caching avoids
+refetching while icon requests still repeat decoding and encoding.
+`BenchmarkArtifactPipeline` compares off, cold-memory and warm-memory output
+caches; warm artifacts retain source validation but skip rendering and packing. See [benchmark methodology and commands](docs/benchmarks.md). The script
 runs offline and CI runs a one-iteration smoke check without timing thresholds.
 
 GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3

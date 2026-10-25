@@ -71,13 +71,14 @@ func (c *pipelineBenchmarkCache) Get(key string) ([]byte, bool) {
 func (c *pipelineBenchmarkCache) clear() { c.Cache = lrucache.New(100_000_000, 3600) }
 
 type pipelineBenchmarkFixture struct {
-	handler http.Handler
-	cache   *pipelineBenchmarkCache
-	fetches atomic.Int64
-	metrics prometheus.Gatherer
+	handler   http.Handler
+	cache     *pipelineBenchmarkCache
+	fetches   atomic.Int64
+	metrics   prometheus.Gatherer
+	artifacts *memoryArtifactStore
 }
 
-func newPipelineBenchmarkFixture(tb testing.TB) *pipelineBenchmarkFixture {
+func newPipelineBenchmarkFixture(tb testing.TB, artifactEnabled ...bool) *pipelineBenchmarkFixture {
 	tb.Helper()
 	// The deterministic rectangular RGBA source exercises fitting and square
 	// padding. Source encoding and fixture setup are outside benchmark timing.
@@ -118,7 +119,22 @@ func newPipelineBenchmarkFixture(tb testing.TB) *pipelineBenchmarkFixture {
 	}
 	proxy := imageproxy.NewProxy(transport, fixture.cache)
 	proxy.Logger = observability.ProxyLogger
-	fixture.handler = observability.PublicHandler(&iconHandler{proxy: proxy})
+	handler := &iconHandler{proxy: proxy}
+	if len(artifactEnabled) > 0 && artifactEnabled[0] {
+		store, err := newMemoryArtifactStore(defaultArtifactCacheBytes, defaultArtifactCacheEntryBytes, defaultArtifactCacheTTL)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		service := newArtifactService(store, "memory", defaultArtifactCacheTTL, defaultArtifactCacheEntryBytes, observability.artifactCache.Observe)
+		fixture.artifacts = store
+		handler.artifacts = service
+		tb.Cleanup(func() {
+			if err := service.Close(); err != nil {
+				tb.Error(err)
+			}
+		})
+	}
+	fixture.handler = observability.PublicHandler(handler)
 	fixture.metrics = observability.metrics.Registry.Gatherer()
 	return fixture
 }
@@ -271,5 +287,60 @@ func BenchmarkPipeline(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+// Source HTTP caching stays warm in all three modes. Only the finished artifact
+// cache changes, so the comparison measures real avoided rendering and packing.
+func BenchmarkArtifactPipeline(b *testing.B) {
+	for _, workload := range pipelineBenchmarkWorkloads()[1:] {
+		for _, mode := range []string{"Off", "MemoryCold", "MemoryWarm"} {
+			b.Run(workload.name+"/"+mode, func(b *testing.B) {
+				b.StopTimer()
+				fixture := newPipelineBenchmarkFixture(b, mode != "Off")
+				runPipelineBenchmarkWorkload(b, fixture, workload)
+				before := fixture.stageSums(b)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					if mode == "MemoryCold" {
+						if err := fixture.artifacts.cache.Purge(); err != nil {
+							b.Fatal(err)
+						}
+					}
+					fixture.resetCounters()
+					b.StartTimer()
+					runPipelineBenchmarkWorkload(b, fixture, workload)
+					b.StopTimer()
+					checkPipelineBenchmarkCounts(b, fixture, workload, false)
+				}
+				after := fixture.stageSums(b)
+				for _, stage := range pipelineBenchmarkStages {
+					b.ReportMetric((after[stage]-before[stage])*1e9/float64(b.N), stage+"_ns/op")
+				}
+			})
+		}
+	}
+}
+
+func TestArtifactBenchmarkWarmSkipsRenderingAndPacking(t *testing.T) {
+	for _, workload := range pipelineBenchmarkWorkloads()[1:] {
+		t.Run(workload.name, func(t *testing.T) {
+			fixture := newPipelineBenchmarkFixture(t, true)
+			runPipelineBenchmarkWorkload(t, fixture, workload)
+			before := fixture.stageSums(t)
+			fixture.resetCounters()
+			runPipelineBenchmarkWorkload(t, fixture, workload)
+			after := fixture.stageSums(t)
+			checkPipelineBenchmarkCounts(t, fixture, workload, false)
+			for _, stage := range []string{"transform", "encode", "pack"} {
+				if after[stage] != before[stage] {
+					t.Fatalf("warm artifact repeated %s", stage)
+				}
+			}
+			if after["write"] <= before["write"] || after["decode"] <= before["decode"] {
+				t.Fatal("warm artifact skipped source validation or response write")
+			}
+		})
 	}
 }

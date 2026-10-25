@@ -30,6 +30,7 @@ type observability struct {
 	metrics       *metricskit.HTTPMetrics
 	imagePipeline *pipelineObserver
 	iconsPipeline *pipelineObserver
+	artifactCache *artifactObserver
 	metricsPage   http.Handler
 	liveness      http.Handler
 	readiness     http.Handler
@@ -64,6 +65,7 @@ func newObservability(out io.Writer, level string) (*observability, error) {
 	metricConfig.IncludeResponseSize = true
 	o.metrics = metricskit.NewHTTPMetrics(metricConfig)
 	o.imagePipeline, o.iconsPipeline = newPipelineObservers(o.metrics.Registry)
+	o.artifactCache = newArtifactObserver(o.metrics.Registry)
 	o.metricsPage = metricskit.HandlerFor(o.metrics.Registry)
 
 	o.liveness = healthkit.LivenessHandler("favicon-generator")
