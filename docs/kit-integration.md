@@ -78,5 +78,36 @@ Go version, CPU allocation and full repeated output for comparisons. The
 historical source-cache baseline in [benchmarks.md](benchmarks.md) predates
 finished artifact caching and remains a historical result.
 
-Redis and two-instance recovery scenarios are added only after the Redis backend
-is integrated; this local suite makes no claim that a Redis process is covered.
+## Real Redis and independent service instances
+
+`TestRedisArtifactKitTwoInstancesShareValidatedBrowserProducts` parses the real
+CLI flags and calls the production service/backend factory for two independent
+service instances in one Go test process. They have separate public middleware,
+registries, source proxies, admission state and Redis pools, and share only the
+Redis namespace. Both redis-only and tiered modes exercise the six serial PNGs
+and ZIP. The second instance must reuse all seven products without transform,
+encode or pack observations, while still fetching/checking the current source
+and writing all seven responses. Signed-source rejection, private registry
+isolation and warm HEAD semantics remain checked.
+
+`TestRedisArtifactKitRequestDrivenStartupRecovery` injects a deterministic first
+dial failure into the lazy recovery wrapper, then recovers using actual Redis
+commands. The complete public pipeline generates a valid bounded fallback,
+publishes on the next admitted request, and exposes that output to a second
+instance. `TestRedisArtifactKitCommandFailureRecoversWithoutRestart` pauses a
+disposable Redis server, verifies fallback after the real command budget expires,
+then waits for its PING response and verifies warm reuse without restarting the
+application. These tests set the private cooldown test knob to zero to avoid
+sleeping; separate backend tests cover the production cooldown. They do not
+simulate or report performance latency.
+
+These tests inherit the random-prefix cleanup and required-service policy from
+`redisArtifactIntegration`. They skip locally without `REDIS_TEST_ADDR`; the
+existing dedicated Redis CI job matches their `TestRedisArtifact` prefix and
+requires the pinned official service. Only use a disposable Redis server because
+the suite exercises ACL and CLIENT PAUSE, as described in [redis-cache.md](redis-cache.md).
+
+```sh
+REDIS_TEST_ADDR=127.0.0.1:6379 REDIS_TEST_REQUIRED=1 \
+  go test -mod=readonly -race -count=1 -timeout=2m -run '^TestRedisArtifactKit' .
+```
