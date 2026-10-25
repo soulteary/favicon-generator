@@ -407,3 +407,30 @@ func TestTransformWithBudgetUsesActualByteAndAnimationLimits(t *testing.T) {
 		t.Fatalf("static output: %s %dx%d, error=%v", format, config.Width, config.Height, err)
 	}
 }
+
+type cancelSourceDecodeObserver struct{ cancel context.CancelFunc }
+
+func (o cancelSourceDecodeObserver) ObserveStage(stage, _ string, _ time.Duration) {
+	if stage == "decode" {
+		o.cancel()
+	}
+}
+func (cancelSourceDecodeObserver) ObserveCache(string, string) {}
+
+func TestWithSourcePreflightCancellationPreservesContextError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = WithObserver(ctx, cancelSourceDecodeObserver{cancel})
+	p := NewProxy(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		// The decoder fails while the caller cancels. Some image decoders
+		// replace a reader's context error with a generic format error.
+		return policyResponse(req, []byte("invalid PNG"), "image/png"), nil
+	}), nil)
+	err := p.WithSource(ctx, sourceURL(t, "https://origin.test/image"), "", func(context.Context, []byte, SourceLimits) error {
+		t.Error("canceled preflight entered callback")
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("preflight lost cancellation: %v", err)
+	}
+}
