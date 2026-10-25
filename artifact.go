@@ -208,15 +208,8 @@ func validateArtifact(ctx context.Context, entry artifactEntry, key, filename st
 			return err
 		}
 	} else {
-		// Our fixed eight-file ZIP has no comment or ZIP64 directory. Check its
-		// bounded entry count before archive/zip can allocate a directory from
-		// a forged count in a corrupted cache value.
-		if len(entry.Body) < 22 || !bytes.Equal(entry.Body[:4], []byte{'P', 'K', 3, 4}) {
-			return errInvalidArtifact
-		}
-		tail := entry.Body[len(entry.Body)-22:]
-		if !bytes.Equal(tail[:4], []byte{'P', 'K', 5, 6}) || binary.LittleEndian.Uint16(tail[4:6]) != 0 || binary.LittleEndian.Uint16(tail[6:8]) != 0 || binary.LittleEndian.Uint16(tail[8:10]) != 8 || binary.LittleEndian.Uint16(tail[10:12]) != 8 || binary.LittleEndian.Uint16(tail[20:22]) != 0 {
-			return errInvalidArtifact
+		if err := validateArtifactZIPDirectory(entry.Body); err != nil {
+			return err
 		}
 		archive, err := zip.NewReader(bytes.NewReader(entry.Body), int64(len(entry.Body)))
 		if err != nil || len(archive.File) != 8 {
@@ -233,6 +226,44 @@ func validateArtifact(ctx context.Context, entry artifactEntry, key, filename st
 		}
 	}
 	return ctx.Err()
+}
+
+// archive/zip reads directory headers until they end, not merely the advertised
+// EOCD count (which is compared modulo 65536). Scan the actual fixed directory
+// without allocation before allowing it to create any File values. Our ZIPs
+// have no prefix, ZIP64 directory, split disks, or trailing comment.
+func validateArtifactZIPDirectory(data []byte) error {
+	if len(data) < 22 || !bytes.Equal(data[:4], []byte{'P', 'K', 3, 4}) {
+		return errInvalidArtifact
+	}
+	end := uint64(len(data) - 22)
+	tail := data[end:]
+	if !bytes.Equal(tail[:4], []byte{'P', 'K', 5, 6}) || binary.LittleEndian.Uint16(tail[4:6]) != 0 || binary.LittleEndian.Uint16(tail[6:8]) != 0 || binary.LittleEndian.Uint16(tail[8:10]) != 8 || binary.LittleEndian.Uint16(tail[10:12]) != 8 || binary.LittleEndian.Uint16(tail[20:22]) != 0 {
+		return errInvalidArtifact
+	}
+	cursor := uint64(binary.LittleEndian.Uint32(tail[16:20]))
+	size := uint64(binary.LittleEndian.Uint32(tail[12:16]))
+	if cursor < 4 || cursor > end || size != end-cursor {
+		return errInvalidArtifact
+	}
+	for range 8 {
+		if end-cursor < 46 {
+			return errInvalidArtifact
+		}
+		header := data[cursor : cursor+46]
+		if !bytes.Equal(header[:4], []byte{'P', 'K', 1, 2}) || binary.LittleEndian.Uint16(header[34:36]) != 0 {
+			return errInvalidArtifact
+		}
+		length := uint64(46) + uint64(binary.LittleEndian.Uint16(header[28:30])) + uint64(binary.LittleEndian.Uint16(header[30:32])) + uint64(binary.LittleEndian.Uint16(header[32:34]))
+		if length > end-cursor {
+			return errInvalidArtifact
+		}
+		cursor += length
+	}
+	if cursor != end {
+		return errInvalidArtifact
+	}
+	return nil
 }
 
 func validateArtifactICO(data []byte) error {

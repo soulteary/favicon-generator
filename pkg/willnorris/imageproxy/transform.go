@@ -162,7 +162,14 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 // no transformation. Pixel/frame rejections are attributed to this preflight.
 func preflightImage(ctx context.Context, img []byte, maxPixels int64, maxFrames int) (format string, frames int, err error) {
 	finish := StartStage(ctx, "decode")
-	defer func() { finish(err) }()
+	defer func() {
+		// image.DecodeConfig's format sniffing can replace a canceled Peek
+		// with image.ErrFormat. Preserve the request result and stage label.
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		finish(err)
+	}()
 	if err = checkWebP(ctx, img, maxPixels); err != nil {
 		return
 	}
