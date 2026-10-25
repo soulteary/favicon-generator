@@ -123,3 +123,32 @@ See [the benchmark guide](benchmarks.md) for reproducible cold/warm workloads,
 including the browser's six PNG requests followed by a ZIP request. These
 measurements establish whether later output caching is justified; they do not
 add an output cache or change existing response privacy policies.
+
+## Finished artifacts
+
+`favicon_generator_artifact_cache_requests_total{backend,result}` uses fixed
+backend labels (`off`, `memory`, `redis`, `tiered`) and outcomes (`hit`, `miss`,
+`bypass`, `error`). The currently configurable backends are `off` and `memory`.
+Each eligible application request records one decision after the source has
+passed authorization and image preflight. A hit avoids rendering/encoding and
+ZIP packing, but still records the source checks and final response write.
+There are no raw URLs, cache keys, source metadata or filenames in these labels.
+
+- `hit`: a valid, unexpired finished artifact was reused, including after waiting
+  for another request's successful synchronous fill.
+- `miss`: an eligible product was generated after a missing entry. A generation
+  failure still describes a cache miss and is never published.
+- `bypass`: disabled caching, unsupported product/source policy, expired source
+  sharing horizon, per-entry storage cap, or saturated fill coordination. The
+  normal bounded generator handles the request.
+- `error`: backend read/write failure, invalid stored content, a request canceled
+  while accessing/waiting for the cache, or a current cached-output budget
+  rejection. Availability failures generate uncached; caller cancellation and
+  resource errors retain their normal HTTP result.
+
+The memory backend owns a bounded LRU using httpcache-kit resources. A per-store
+context-aware gate bounds simultaneous temporary wire/read copies. Logical
+expiry and current source retention are checked on every read, independent of
+any sweeper; there is no cache background worker. Deletion replaces a key with a
+small, capacity-accounted tombstone instead of accumulating stale markers.
+Response bodies retain `private, no-store` even when an internal artifact is reused.

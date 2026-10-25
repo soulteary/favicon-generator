@@ -164,3 +164,22 @@ operations do not establish a speedup. The robust distinction here is one
 versus zero origin calls, and continued transform/encode work. Real network
 latency can make source caching substantially more valuable; measure production
 traffic with the stage and cache metrics before selecting an output-cache policy.
+
+## Opt-in artifact caching
+
+The original `BenchmarkPipeline` keeps the default artifact cache disabled.
+Compare the finished-cache paths separately:
+
+```sh
+BENCHMARK_PATTERN='^BenchmarkArtifactPipeline$' ./scripts/benchmark.sh
+```
+
+The source HTTP cache stays warm in all modes. `Off` performs normal generation,
+`MemoryCold` removes finished entries before each measured workload, and
+`MemoryWarm` reuses previously generated products. These modes cover PNG, ZIP
+and six serial previews followed by ZIP. They use the production handler,
+private stage histograms, and the actual capacity-bounded httpcache-kit store.
+Warm artifacts must show no additional transform, encode or pack observations;
+source validation and final writes remain part of the measured work. Clear and
+setup operations are outside timing. Per-operation allocation totals are not
+peak live memory or a promise about process RSS.

@@ -26,7 +26,7 @@ type memoryArtifactStore struct {
 }
 
 func newMemoryArtifactStore(capacity, maxBody int64, ttl time.Duration) (*memoryArtifactStore, error) {
-	if maxBody <= 0 || artifactWireLimit(maxBody) > capacity-artifactResourceOverhead || ttl <= 0 || ttl > maxArtifactTTL {
+	if capacity <= 0 || maxBody <= 0 || artifactWireLimit(maxBody) > capacity-artifactResourceOverhead || ttl <= 0 || ttl > maxArtifactTTL {
 		return nil, errors.New("invalid artifact memory cache limits")
 	}
 	return &memoryArtifactStore{

@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"image"
 	"image/color"
@@ -143,11 +144,15 @@ func TestArtifactMemoryOwnershipExpiryBoundsAndClose(t *testing.T) {
 		t.Fatalf("oversize = %v", err)
 	}
 	// No sweeper runs; a read must enforce the encoded logical deadline.
-	entry = newArtifactEntry(key, "favicon.ico", []byte("expires"), time.Now().Add(10*time.Millisecond))
-	if err := store.Put(context.Background(), entry); err != nil {
+	entry = newArtifactEntry(key, "favicon.ico", []byte("expires"), time.Now().Add(time.Minute))
+	wire, err := encodeArtifact(context.Background(), entry, store.maxBody)
+	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	binary.BigEndian.PutUint64(wire[8:16], uint64(time.Now().Add(-time.Second).UnixNano()))
+	if err := store.store(context.Background(), key, http.StatusOK, wire); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Get(context.Background(), key); !errors.Is(err, errArtifactMiss) {
 		t.Fatalf("expired = %v", err)
 	}
@@ -161,9 +166,9 @@ func TestArtifactMemoryOwnershipExpiryBoundsAndClose(t *testing.T) {
 	}
 	// An operation waiting for temporary-copy ownership is cancelable.
 	store.gate <- struct{}{}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := store.Get(ctx, key); !errors.Is(err, context.Canceled) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := store.Get(ctx, key); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("cancel = %v", err)
 	}
 	<-store.gate
@@ -471,6 +476,123 @@ func TestArtifactMetricsPrivateAndFixedLabels(t *testing.T) {
 		obs.AdminHandler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 		if !strings.Contains(w.Body.String(), `favicon_generator_artifact_cache_requests_total{backend="memory",result="hit"} 101`) || strings.Contains(w.Body.String(), "secret") {
 			t.Fatal("metrics conflict or unbounded labels")
+		}
+	}
+}
+
+type blockingArtifactStore struct {
+	artifactTestStore
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingArtifactStore) Put(ctx context.Context, e artifactEntry) error {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-s.release:
+		return s.artifactTestStore.Put(ctx, e)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestArtifactWaiterKeepsProxySlotAndDeadline(t *testing.T) {
+	data := iconSourcePNG(t)
+	calls := make(chan struct{}, 4)
+	p := imageproxy.NewProxy(iconTransport(func(r *http.Request) (*http.Response, error) {
+		calls <- struct{}{}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}, "Cache-Control": {"public, max-age=3600"}, "Date": {time.Now().UTC().Format(http.TimeFormat)}}, Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data)), Request: r}, nil
+	}), nil)
+	p.MaxConcurrentRequests = 2
+	store := &blockingArtifactStore{entered: make(chan struct{}), release: make(chan struct{})}
+	service := newArtifactService(store, "memory", time.Minute, 1<<20, nil)
+	handler := &iconHandler{proxy: p, artifacts: service}
+	q := url.Values{"url": {"https://origin.test/logo.png"}}
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- iconRequest(handler, "GET", "favicon-32x32.png", q) }()
+	<-store.entered
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest("GET", "/icons/favicon-32x32.png?"+q.Encode(), nil).WithContext(waiterCtx)
+	second := make(chan *httptest.ResponseRecorder, 1)
+	go func() { w := httptest.NewRecorder(); handler.ServeHTTP(w, request); second <- w }()
+	<-calls
+	<-calls
+	if w := iconRequest(handler, "GET", "favicon-32x32.png", q); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("waiter did not retain slot: %d", w.Code)
+	}
+	cancel()
+	if w := <-second; w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("waiter cancellation = %d", w.Code)
+	}
+	close(store.release)
+	if w := <-first; w.Code != 200 {
+		t.Fatalf("leader affected by waiter cancel: %d", w.Code)
+	}
+	if w := iconRequest(handler, "HEAD", "favicon-32x32.png", q); w.Code != 200 || w.Body.Len() != 0 {
+		t.Fatalf("slot not released or HEAD body: %d/%d", w.Code, w.Body.Len())
+	}
+}
+
+func TestArtifactHandlerSourceBudgetsStillApplyOnWarmEntry(t *testing.T) {
+	data := iconSourcePNG(t)
+	for _, kind := range []string{"bytes", "pixels", "content-type"} {
+		t.Run(kind, func(t *testing.T) {
+			header := http.Header{"Content-Type": {"image/png"}, "Cache-Control": {"public, max-age=3600"}, "Date": {time.Now().UTC().Format(http.TimeFormat)}}
+			p := imageproxy.NewProxy(iconTransport(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Header: header.Clone(), Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data)), Request: r}, nil
+			}), nil)
+			store := &artifactTestStore{}
+			service := newArtifactService(store, "memory", time.Minute, 1<<20, nil)
+			handler := &iconHandler{proxy: p, artifacts: service}
+			q := url.Values{"url": {"https://origin.test/logo.png"}}
+			if w := iconRequest(handler, "GET", "favicon-32x32.png", q); w.Code != 200 {
+				t.Fatal(w.Code)
+			}
+			switch kind {
+			case "bytes":
+				p.MaxResponseBytes = int64(len(data) - 1)
+			case "pixels":
+				p.MaxPixels = 1
+			case "content-type":
+				p.ContentTypes = []string{"image/jpeg"}
+			}
+			w := iconRequest(handler, "GET", "favicon-32x32.png", q)
+			if (kind != "content-type" && w.Code != 413) || (kind == "content-type" && w.Code != 403) {
+				t.Fatalf("warm source guard = %d body=%s", w.Code, w.Body)
+			}
+			if store.puts != 1 {
+				t.Fatal("failed source reached artifact generation")
+			}
+		})
+	}
+}
+
+func TestArtifactPerEntryBypassAndCurrentPixelReject(t *testing.T) {
+	source, data, limits, metadata := artifactTestSource(t, "public, max-age=3600")
+	store := &artifactTestStore{}
+	service := newArtifactService(store, "memory", time.Minute, 1, nil)
+	body, err := service.GetOrGenerate(context.Background(), source, metadata, "favicon-32x32.png", "", "", limits, func(ctx context.Context) ([]byte, error) {
+		return generateIcon(ctx, data, limits, "favicon-32x32.png", "", "", nil)
+	})
+	if err != nil || len(body) < 2 || store.puts != 0 {
+		t.Fatalf("small entry cap must bypass storage: %d %v", len(body), err)
+	}
+	small := limits
+	small.MaxPixels = 1
+	key, _ := artifactKey(source, metadata, "favicon-32x32.png", "", "", small)
+	store.entries = map[string]artifactEntry{key: newArtifactEntry(key, "favicon-32x32.png", body, time.Now().Add(time.Minute))}
+	service = newArtifactService(store, "memory", time.Minute, 1<<20, nil)
+	if _, err := service.GetOrGenerate(context.Background(), source, metadata, "favicon-32x32.png", "", "", small, func(context.Context) ([]byte, error) { t.Fatal("regenerated over pixel budget"); return nil, nil }); !errors.Is(err, imageproxy.ErrImageTooLarge) {
+		t.Fatalf("pixel budget = %v", err)
+	}
+}
+
+func TestArtifactMemoryConstructorRejectsUnboundedConfiguration(t *testing.T) {
+	for _, limits := range [][2]int64{{-1, 1}, {0, 1}, {4096, 0}, {4096, -1}, {512, 1024}, {9223372036854775807, 9223372036854775807}} {
+		if store, err := newMemoryArtifactStore(limits[0], limits[1], time.Minute); err == nil {
+			store.Close()
+			t.Fatalf("accepted %v", limits)
 		}
 	}
 }

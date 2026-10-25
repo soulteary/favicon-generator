@@ -78,6 +78,7 @@ func TestConfigAllExplicitValuesSkipEnvironmentLookup(t *testing.T) {
 		"-addr=:0", "-adminAddr=", "-logLevel= WARN ", "-followRedirects=false", "-scaleUp=false", "-verbose=false", "-version=false",
 		"-baseURL=", "-allowHosts=", "-contentTypes=", "-signatureKey=", "-cache=",
 		"-timeout=2s", "-shutdownTimeout=1ns", "-maxResponseBytes=64", "-maxPixels=8", "-maxFrames=1", "-maxConcurrent=1",
+		"-artifactCache=off", "-artifactCacheBytes=4096", "-artifactCacheEntryBytes=64", "-artifactCacheTTL=1m",
 	}, func(key string) (string, bool) {
 		t.Errorf("explicit CLI option consulted lower-priority environment %s", key)
 		return "SECRET_INVALID_ENV", true
