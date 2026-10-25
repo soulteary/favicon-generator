@@ -90,10 +90,19 @@ func TestRedisArtifactIntegrationRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Equal(fresh.Body, entry.Body) {
 		t.Fatalf("returned bytes alias Redis or another result: %v", err)
 	}
-	ttl, err := admin.PTTL(ctx, cfg.Prefix+entry.Key).Result()
-	if err != nil || ttl <= 0 || ttl > time.Until(entry.ExpiresAt)+time.Millisecond {
-		t.Fatalf("absolute expiry: ttl=%v err=%v", ttl, err)
+	checkExpiry := func() {
+		t.Helper()
+		// Read the stored absolute deadline instead of comparing a server TTL
+		// with the client's clock after another network round trip.
+		expiresAt, err := admin.Do(ctx, "PEXPIRETIME", cfg.Prefix+entry.Key).Int64()
+		if err != nil || expiresAt != entry.ExpiresAt.UnixMilli() {
+			t.Fatalf("absolute expiry: got=%d want=%d err=%v", expiresAt, entry.ExpiresAt.UnixMilli(), err)
+		}
+		if ttl, err := admin.PTTL(ctx, cfg.Prefix+entry.Key).Result(); err != nil || ttl <= 0 {
+			t.Fatalf("entry is not live: ttl=%v err=%v", ttl, err)
+		}
 	}
+	checkExpiry()
 	var workers sync.WaitGroup
 	for range 16 {
 		workers.Add(1)
@@ -109,6 +118,7 @@ func TestRedisArtifactIntegrationRoundTrip(t *testing.T) {
 		}()
 	}
 	workers.Wait()
+	checkExpiry() // Repeated concurrent fills must not extend the deadline.
 	if err := store.Delete(ctx, entry.Key); err != nil {
 		t.Fatal(err)
 	}
