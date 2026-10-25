@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 type tieredArtifactStore struct {
 	local, remote artifactStore
 	observe       func(string, string)
+	closed        atomic.Bool
 	closeOnce     sync.Once
 	closeErr      error
 }
@@ -24,6 +26,9 @@ func (s *tieredArtifactStore) remoteError(err error) {
 func (s *tieredArtifactStore) Get(ctx context.Context, key string) (artifactEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return artifactEntry{}, err
+	}
+	if s.closed.Load() {
+		return artifactEntry{}, errArtifactStoreClosed
 	}
 	entry, localErr := s.local.Get(ctx, key)
 	if ctx.Err() != nil {
@@ -53,6 +58,9 @@ func (s *tieredArtifactStore) Put(ctx context.Context, entry artifactEntry) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if s.closed.Load() {
+		return errArtifactStoreClosed
+	}
 	localErr := s.local.Put(ctx, entry)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -69,6 +77,9 @@ func (s *tieredArtifactStore) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if s.closed.Load() {
+		return errArtifactStoreClosed
+	}
 	localErr := s.local.Delete(ctx, key)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -82,6 +93,6 @@ func (s *tieredArtifactStore) Delete(ctx context.Context, key string) error {
 }
 
 func (s *tieredArtifactStore) Close() error {
-	s.closeOnce.Do(func() { s.closeErr = errors.Join(s.remote.Close(), s.local.Close()) })
+	s.closeOnce.Do(func() { s.closed.Store(true); s.closeErr = errors.Join(s.remote.Close(), s.local.Close()) })
 	return s.closeErr
 }

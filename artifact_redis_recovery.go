@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,7 +44,7 @@ func newRecoveringRedisArtifactStore(cfg redisArtifactConfig, maxBody int64) (*r
 	}, nil
 }
 
-func (s *recoveringRedisArtifactStore) ready(ctx context.Context) (artifactStore, error) {
+func (s *recoveringRedisArtifactStore) ready(ctx context.Context, caller context.Context) (artifactStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -85,10 +86,11 @@ func (s *recoveringRedisArtifactStore) ready(ctx context.Context) (artifactStore
 	defer cancel()
 	store, err := s.dial(connectCtx, s.cfg, s.maxBody)
 	if err != nil || store == nil {
-		if ctx.Err() == nil {
+		failure := redisArtifactFailure(caller)
+		if errors.Is(failure, errRedisArtifactUnavailable) {
 			s.failed()
 		}
-		return nil, redisArtifactFailure(ctx)
+		return nil, failure
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -110,7 +112,7 @@ func (s *recoveringRedisArtifactStore) failed() {
 func (s *recoveringRedisArtifactStore) use(ctx context.Context, operation func(context.Context, artifactStore) error) error {
 	bounded, cancel := context.WithTimeout(ctx, s.cfg.OperationTimeout)
 	defer cancel()
-	store, err := s.ready(bounded)
+	store, err := s.ready(bounded, ctx)
 	if err != nil {
 		if bounded.Err() != nil {
 			return redisArtifactFailure(ctx)
@@ -132,6 +134,12 @@ func (s *recoveringRedisArtifactStore) use(ctx context.Context, operation func(c
 
 func (s *recoveringRedisArtifactStore) Get(ctx context.Context, key string) (artifactEntry, error) {
 	var entry artifactEntry
+	if err := ctx.Err(); err != nil {
+		return entry, err
+	}
+	if !validArtifactStorageKey(key) || strings.ToLower(key) != key {
+		return entry, errInvalidArtifact
+	}
 	err := s.use(ctx, func(operation context.Context, store artifactStore) error {
 		var err error
 		entry, err = store.Get(operation, key)
@@ -141,10 +149,22 @@ func (s *recoveringRedisArtifactStore) Get(ctx context.Context, key string) (art
 }
 
 func (s *recoveringRedisArtifactStore) Put(ctx context.Context, entry artifactEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validArtifactStorageKey(entry.Key) || strings.ToLower(entry.Key) != entry.Key {
+		return errInvalidArtifact
+	}
 	return s.use(ctx, func(operation context.Context, store artifactStore) error { return store.Put(operation, entry) })
 }
 
 func (s *recoveringRedisArtifactStore) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validArtifactStorageKey(key) || strings.ToLower(key) != key {
+		return errInvalidArtifact
+	}
 	return s.use(ctx, func(operation context.Context, store artifactStore) error { return store.Delete(operation, key) })
 }
 

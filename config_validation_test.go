@@ -77,7 +77,6 @@ func TestConfigAllExplicitValuesSkipEnvironmentLookup(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-addr=:0", "-adminAddr=", "-logLevel= WARN ", "-followRedirects=false", "-scaleUp=false", "-verbose=false", "-version=false",
 		"-baseURL=", "-allowHosts=", "-contentTypes=", "-signatureKey=", "-cache=",
-		"-artifactCache=off", "-artifactCacheBytes=67108864", "-artifactCacheEntryBytes=20971520", "-artifactCacheTTL=5m",
 		"-artifactRedisAddr=localhost:6379", "-artifactRedisUsername=", "-artifactRedisPassword=", "-artifactRedisDB=0",
 		"-artifactRedisPrefix=favicon:artifacts:v1:", "-artifactRedisTimeout=250ms", "-artifactRedisTLS=false", "-artifactRedisCAFile=", "-artifactRedisServerName=",
 		"-timeout=2s", "-shutdownTimeout=1ns", "-maxResponseBytes=64", "-maxPixels=8", "-maxFrames=1", "-maxConcurrent=1",

@@ -323,3 +323,26 @@ func TestRedisArtifactIntegrationVerifiedTLS(t *testing.T) {
 		t.Fatalf("untrusted certificate was accepted: %v", err)
 	}
 }
+
+func TestRedisArtifactIntegrationServiceWarmReuse(t *testing.T) {
+	_, _, cfg := redisArtifactIntegration(t)
+	backend, err := newRecoveringRedisArtifactStore(cfg, 1<<16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newArtifactService(backend, "redis", time.Minute, 1<<16, nil)
+	defer service.Close()
+	source, _, limits, metadata := artifactTestSource(t, "public,max-age=3600")
+	body := iconStageFixture(t, 32, false)
+	generations := 0
+	generate := func(context.Context) ([]byte, error) { generations++; return bytes.Clone(body), nil }
+	for range 2 {
+		output, err := service.GetOrGenerate(context.Background(), source, metadata, "favicon-32x32.png", "", "", limits, generate)
+		if err != nil || !bytes.Equal(output, body) {
+			t.Fatalf("Redis service output: %v", err)
+		}
+	}
+	if generations != 1 {
+		t.Fatalf("warm Redis artifact regenerated %d times", generations)
+	}
+}

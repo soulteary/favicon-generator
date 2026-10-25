@@ -49,6 +49,10 @@ func validateRedisArtifactConfig(c *Config) error {
 func (c Config) newRedisArtifactBackend() (artifactStore, error) {
 	cfg := c.redisArtifactConfig()
 	if c.ArtifactRedisTLS && c.ArtifactRedisCAFile != "" {
+		metadata, err := os.Stat(c.ArtifactRedisCAFile)
+		if err != nil || !metadata.Mode().IsRegular() || metadata.Size() > maxArtifactRedisCABytes {
+			return nil, invalidConfig("artifactRedisCAFile", "CA bundle must be a regular file of at most 1 MiB")
+		}
 		file, err := os.Open(c.ArtifactRedisCAFile)
 		if err != nil {
 			return nil, invalidConfig("artifactRedisCAFile", "cannot read CA bundle")

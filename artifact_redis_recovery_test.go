@@ -78,6 +78,9 @@ func TestRedisArtifactRecoveryHasOneBoundedStarter(t *testing.T) {
 	if err := <-result; !errors.Is(err, errRedisArtifactUnavailable) || attempts.Load() != 1 {
 		t.Fatalf("starter budget classified as request timeout or retried: %v, %d", err, attempts.Load())
 	}
+	if _, err := store.Get(context.Background(), redisArtifactTestEntry().Key); !errors.Is(err, errRedisArtifactUnavailable) || attempts.Load() != 1 {
+		t.Fatalf("timed-out starter did not enter cooldown: %v, %d", err, attempts.Load())
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,30 @@ signature and resource checks remain in the existing image proxy. The artifact
 service must authorize and validate the source before it looks up an artifact.
 Standalone signed manifests are excluded from the artifact contract.
 
+## Configuration
+
+Choose `-artifactCache redis` or `-artifactCache tiered`; the default remains
+`off`. Tiered mode checks memory first, warms it from remote hits, and keeps
+local population working while Redis is unavailable. The common artifact
+service still applies current source retention and output budgets on every hit.
+
+`-artifactRedisAddr` defaults to `localhost:6379`. Optional connection flags are
+`-artifactRedisUsername`, `-artifactRedisPassword`, `-artifactRedisDB` (zero),
+`-artifactRedisPrefix` (`favicon:artifacts:v1:`), and `-artifactRedisTimeout`
+(250 ms, positive and at most 5 s). The CLI currently configures one Redis node;
+the constructor also accepts universal-client configurations for future callers.
+Environment names follow the existing uppercase flag rule, for example
+`IMAGEPROXY_ARTIFACTREDISPASSWORD`; explicit CLI values win over environment
+values. Prefer an environment-provided secret to a password in process arguments.
+
+Enable `-artifactRedisTLS` for verified TLS. `-artifactRedisCAFile` optionally
+loads a regular PEM CA bundle of at most 1 MiB; otherwise system roots are used.
+`-artifactRedisServerName` optionally selects the verified peer name. CA/name
+flags without TLS, malformed addresses, negative databases, invalid prefixes and
+operation budgets fail configuration without echoing their values. A selected
+backend with an unreadable or invalid CA file also fails startup. There is no
+insecure certificate-verification option.
+
 ## Client and lifetime
 
 `newRedisArtifactStore` uses redis-kit v1.8.0's
@@ -15,6 +39,13 @@ client configuration, including distinct Redis and Sentinel ACL credentials and
 certificate-verified TLS. TLS configurations are cloned and require TLS 1.2 or
 later; insecure certificate verification is rejected. Cluster database selection
 must remain zero.
+
+The application constructs a lazy recovery wrapper: Redis can be offline at
+startup without blocking the service. The first eligible admitted request makes
+one bounded connection attempt; concurrent starters fall back immediately.
+Failures impose a one-second cooldown before a later request tries again. No
+background reconnect task is created. Connection startup and its subsequent
+cache command share one operation deadline.
 
 The default artifact client has eight pooled connections per Redis node and no
 minimum idle connections. Every command has a 250 ms budget by default, capped
@@ -49,9 +80,10 @@ than authenticity against an operator who can rewrite the value and checksum.
 
 SET writes a complete value and absolute expiry in one command; expiry is
 rounded down to milliseconds and checked again in the envelope. Queueing cannot
-extend the stored lifetime. No automatic read-then-delete eviction is performed:
-a late reader must not delete a newer replacement. Explicit Delete affects only
-the requested namespaced key.
+extend the stored lifetime. Get does not mutate or delete a key. The common service can explicitly delete
+a rejected entry before regeneration; this may discard a concurrent equivalent
+refill and cause another bounded generation, without changing content identity.
+Explicit Delete affects only the requested namespaced key.
 
 Content-addressed artifact keys make concurrent valid fills interchangeable;
 fill coordination belongs to the common artifact service. This backend does not

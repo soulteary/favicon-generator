@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"math"
 	"net"
@@ -133,10 +132,7 @@ func (s *redisArtifactStore) operation(ctx context.Context, key string) (context
 	if s.closed.Load() {
 		return nil, nil, "", errRedisArtifactClosed
 	}
-	if len(key) != 64 || strings.ToLower(key) != key {
-		return nil, nil, "", errInvalidArtifact
-	}
-	if _, err := hex.DecodeString(key); err != nil {
+	if !validArtifactStorageKey(key) || strings.ToLower(key) != key {
 		return nil, nil, "", errInvalidArtifact
 	}
 	bounded, cancel := context.WithTimeout(ctx, s.timeout)
