@@ -23,6 +23,7 @@
 package gifresize // import "github.com/willnorris/gifresize"
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"image/draw"
@@ -40,6 +41,18 @@ func Process(w io.Writer, r io.Reader, transform TransformFunc) error {
 		_, err := io.Copy(w, r)
 		return err
 	}
+	return ProcessWithContext(context.Background(), w, r, func(img image.Image) (image.Image, error) {
+		return transform(img), nil
+	})
+}
+
+// ProcessWithContext is Process with cancellation and a transform that can fail.
+// Callers handling untrusted GIFs must bound the input's frame count and decoded
+// pixel count before calling this function, since gif.DecodeAll retains frames.
+func ProcessWithContext(ctx context.Context, w io.Writer, r io.Reader, transform func(image.Image) (image.Image, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Decode the original gif.
 	im, err := gif.DecodeAll(r)
@@ -48,16 +61,22 @@ func Process(w io.Writer, r io.Reader, transform TransformFunc) error {
 	}
 
 	// Create a new RGBA image to hold the incremental frames.
-	firstFrame := im.Image[0].Bounds()
-	b := image.Rect(0, 0, firstFrame.Dx(), firstFrame.Dy())
+	b := image.Rect(0, 0, im.Config.Width, im.Config.Height)
 	img := image.NewRGBA(b)
 
 	// Resize each frame.
 	for index, frame := range im.Image {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		bounds := frame.Bounds()
 		previous := img
 		draw.Draw(img, bounds, frame, bounds.Min, draw.Over)
-		im.Image[index] = imageToPaletted(transform(img), frame.Palette)
+		transformed, err := transform(img)
+		if err != nil {
+			return err
+		}
+		im.Image[index] = imageToPaletted(transformed, frame.Palette)
 
 		switch im.Disposal[index] {
 		case gif.DisposalBackground:
@@ -74,6 +93,9 @@ func Process(w io.Writer, r io.Reader, transform TransformFunc) error {
 	im.Config.Width = im.Image[0].Bounds().Max.X
 	im.Config.Height = im.Image[0].Bounds().Max.Y
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return gif.EncodeAll(w, im)
 }
 

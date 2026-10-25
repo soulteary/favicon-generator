@@ -99,6 +99,8 @@ func TestHostMatches(t *testing.T) {
 		{"http://b.test/image", true},
 		{"http://x.b.test/image", true},
 		{"http://x.y.b.test/image", true},
+		{"http://evilb.test/image", false},
+		{"http://B.TEST./image", true},
 
 		{"http://c.test/image", false},
 		{"http://xc.test/image", false},
@@ -293,6 +295,7 @@ func TestProxy_ServeHTTP(t *testing.T) {
 			Transport: testTransport{},
 		},
 		ContentTypes: []string{"image/*"},
+		AllowHosts:   []string{"good.test"},
 	}
 
 	tests := []struct {
@@ -300,10 +303,10 @@ func TestProxy_ServeHTTP(t *testing.T) {
 		code int    // expected response status code
 	}{
 		{"/favicon.ico", http.StatusOK},
-		{"//foo", http.StatusBadRequest},                            // invalid request URL
-		{"/http://bad.test/", http.StatusForbidden},                 // Disallowed host
-		{"/http://good.test/error", http.StatusInternalServerError}, // HTTP protocol error
-		{"/http://good.test/nocontent", http.StatusNoContent},       // non-OK response
+		{"//foo", http.StatusBadRequest},                      // invalid request URL
+		{"/http://bad.test/", http.StatusForbidden},           // Disallowed host
+		{"/http://good.test/error", http.StatusBadGateway},    // HTTP protocol error
+		{"/http://good.test/nocontent", http.StatusNoContent}, // non-OK response
 		{"/100/http://good.test/png", http.StatusOK},
 		{"/100/http://good.test/plain", http.StatusForbidden}, // non-image response
 
@@ -358,7 +361,7 @@ func TestProxy_ServeHTTP_maxRedirects(t *testing.T) {
 	}{
 		{"/http://redirect.test/redirects-0", http.StatusOK},
 		{"/http://redirect.test/redirects-2", http.StatusOK},
-		{"/http://redirect.test/redirects-11", http.StatusInternalServerError}, // too many redirects
+		{"/http://redirect.test/redirects-11", http.StatusBadGateway}, // too many redirects
 	}
 
 	for _, tt := range tests {

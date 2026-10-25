@@ -28,135 +28,78 @@
 package smartcrop
 
 import (
-	"errors"
-	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
-	"io/ioutil"
-	"os"
-	"strings"
+	"image/color"
 	"testing"
 
 	"github.com/muesli/smartcrop/nfnt"
 )
 
-var (
-	testFile = "./examples/gopher.jpg"
-)
+// A textured subject against a flat background gives the analyzer a reproducible
+// region of interest without depending on external example images.
+func cropFixture(subject image.Rectangle) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, 800, 400))
+	for y := subject.Min.Y; y < subject.Max.Y; y++ {
+		for x := subject.Min.X; x < subject.Max.X; x++ {
+			c := color.RGBA{220, 160, 120, 255}
+			if (x/8+y/8)%2 == 0 {
+				c = color.RGBA{255, 220, 180, 255}
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
+}
 
-// Moved here and unexported to decouple the resizer implementation.
 func smartCrop(img image.Image, width, height int) (image.Rectangle, error) {
 	analyzer := NewAnalyzer(nfnt.NewDefaultResizer())
 	return analyzer.FindBestCrop(img, width, height)
 }
 
-type SubImager interface {
-	SubImage(r image.Rectangle) image.Image
-}
-
 func TestCrop(t *testing.T) {
-	fi, _ := os.Open(testFile)
-	defer fi.Close()
-
-	img, _, err := image.Decode(fi)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	topCrop, err := smartCrop(img, 250, 250)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := image.Rect(464, 24, 719, 279)
-	if topCrop != expected {
-		t.Fatalf("expected %v, got %v", expected, topCrop)
-	}
-
-	sub, ok := img.(SubImager)
-	if ok {
-		cropImage := sub.SubImage(topCrop)
-		// cropImage := sub.SubImage(image.Rect(topCrop.X, topCrop.Y, topCrop.Width+topCrop.X, topCrop.Height+topCrop.Y))
-		writeImage("jpeg", cropImage, "./smartcrop.jpg")
-	} else {
-		t.Error(errors.New("No SubImage support"))
+	for _, tc := range []struct {
+		subject image.Rectangle
+		want    image.Rectangle
+	}{
+		{image.Rect(120, 160, 200, 240), image.Rect(0, 40, 360, 400)},
+		{image.Rect(600, 160, 680, 240), image.Rect(368, 40, 728, 400)},
+	} {
+		subject := tc.subject
+		img := cropFixture(subject)
+		crop, err := smartCrop(img, 250, 250)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if crop != tc.want {
+			t.Fatalf("subject %v: crop = %v, want %v", subject, crop, tc.want)
+		}
+		if crop.Empty() || !crop.In(img.Bounds()) || crop.Dx() != crop.Dy() {
+			t.Fatalf("invalid square crop: %v", crop)
+		}
+		if !subject.In(crop) {
+			t.Fatalf("crop %v lost the subject %v", crop, subject)
+		}
+		if got := img.SubImage(crop).Bounds(); got != crop {
+			t.Fatalf("subimage bounds = %v, want %v", got, crop)
+		}
 	}
 }
 
 func BenchmarkCrop(b *testing.B) {
-	fi, err := os.Open(testFile)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer fi.Close()
-
-	img, _, err := image.Decode(fi)
-	if err != nil {
-		b.Fatal(err)
-	}
-
+	img := cropFixture(image.Rect(600, 160, 680, 240))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := smartCrop(img, 250, 250); err != nil {
-			b.Error(err)
+			b.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkEdge(b *testing.B) {
-	fi, err := os.Open(testFile)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer fi.Close()
-
-	img, _, err := image.Decode(fi)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	rgbaImg := toRGBA(img)
+	img := cropFixture(image.Rect(600, 160, 680, 240))
+	out := image.NewRGBA(img.Bounds())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		o := image.NewRGBA(img.Bounds())
-		edgeDetect(rgbaImg, o)
+		edgeDetect(img, out)
 	}
-}
-
-func BenchmarkImageDir(b *testing.B) {
-	files, err := ioutil.ReadDir("./examples")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	for _, file := range files {
-		if strings.Contains(file.Name(), ".jpg") {
-			fi, _ := os.Open("./examples/" + file.Name())
-			defer fi.Close()
-
-			img, _, err := image.Decode(fi)
-			if err != nil {
-				b.Error(err)
-				continue
-			}
-
-			topCrop, err := smartCrop(img, 220, 220)
-			if err != nil {
-				b.Error(err)
-				continue
-			}
-			fmt.Printf("Top crop: %+v\n", topCrop)
-
-			sub, ok := img.(SubImager)
-			if ok {
-				cropImage := sub.SubImage(topCrop)
-				// cropImage := sub.SubImage(image.Rect(topCrop.X, topCrop.Y, topCrop.Width+topCrop.X, topCrop.Height+topCrop.Y))
-				writeImage("jpeg", cropImage, "/tmp/smartcrop/smartcrop-"+file.Name())
-			} else {
-				b.Error(errors.New("No SubImage support"))
-			}
-		}
-	}
-	// fmt.Println("average time/image:", b.t)
 }

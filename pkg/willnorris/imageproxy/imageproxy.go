@@ -8,33 +8,50 @@ package imageproxy // import "github.com/willnorris/imageproxy"
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/fcjr/aia-transport-go"
 	"github.com/gregjones/httpcache"
-	tphttp "github.com/willnorris/imageproxy/third_party/http"
 )
 
 // Maximum number of redirection-followings allowed.
 const maxRedirects = 10
 
 // Proxy serves image requests.
+// Configure a Proxy before serving requests; configuration must not be mutated
+// while requests are in flight. Custom transports must enforce equivalent
+// connection-time address checks to the default transport.
 type Proxy struct {
 	Client *http.Client // client used to fetch remote URLs
 	Cache  Cache        // cache used to cache responses
+
+	// Optional additional restrictions. Both apply when both are configured.
+	AllowHosts    []string
+	SignatureKeys [][]byte
+
+	// Non-positive resource limits use the safe defaults.
+	MaxResponseBytes      int64
+	MaxPixels             int64
+	MaxFrames             int
+	MaxConcurrentRequests int
+
+	initOnce sync.Once
+	slots    chan struct{}
+	client   *http.Client
 
 	// FollowRedirects controls whether imageproxy will follow redirects or not.
 	FollowRedirects bool
@@ -52,7 +69,7 @@ type Proxy struct {
 
 	// Timeout specifies a time limit for requests served by this Proxy.
 	// If a call runs for longer than its time limit, a 504 Gateway Timeout
-	// response is returned.  A Timeout of zero means no timeout.
+	// response is returned. Non-positive values use DefaultTimeout.
 	Timeout time.Duration
 
 	// If true, log additional debug messages
@@ -67,158 +84,183 @@ type Proxy struct {
 	PassRequestHeaders []string
 }
 
-// NewProxy constructs a new proxy.  The provided http RoundTripper will be
-// used to fetch remote URLs.  If nil is provided, http.DefaultTransport will
-// be used.
+// NewProxy constructs a proxy with safe defaults. A nil transport uses a
+// context-aware transport that only connects to public IP addresses.
 func NewProxy(transport http.RoundTripper, cache Cache) *Proxy {
 	if transport == nil {
-		transport, _ = aia.NewTransport()
+		transport = newSafeTransport()
 	}
 	if cache == nil {
 		cache = NopCache
 	}
-
 	proxy := &Proxy{
-		Cache: cache,
+		Cache:                 cache,
+		FollowRedirects:       true,
+		Timeout:               DefaultTimeout,
+		ContentTypes:          []string{"image/*"},
+		MaxResponseBytes:      DefaultMaxResponseBytes,
+		MaxPixels:             DefaultMaxPixels,
+		MaxFrames:             DefaultMaxFrames,
+		MaxConcurrentRequests: DefaultMaxConcurrentRequests,
 	}
-
 	client := new(http.Client)
 	client.Transport = &httpcache.Transport{
 		Transport: &TransformingTransport{
-			Transport:     transport,
+			Transport:     &fetchTransport{Transport: transport},
 			CachingClient: client,
-			log: func(format string, v ...interface{}) {
-				if proxy.Verbose {
-					proxy.logf(format, v...)
-				}
-			},
 		},
 		Cache:               cache,
 		MarkCachedResponses: true,
 	}
-
 	proxy.Client = client
-
 	return proxy
 }
 
-// ServeHTTP handles incoming requests.
-func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/favicon.ico" {
-		return // ignore favicon requests
-	}
+func (p *Proxy) prepare() {
+	p.initOnce.Do(func() {
+		limit := p.MaxConcurrentRequests
+		if limit <= 0 {
+			limit = DefaultMaxConcurrentRequests
+		}
+		p.slots = make(chan struct{}, limit)
+		p.client = p.Client
+		if p.client == nil {
+			p.client = NewProxy(nil, p.Cache).Client
+		}
+	})
+}
 
+// ServeHTTP handles incoming requests without starting detached background work.
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path == "/favicon.ico" {
+		return
+	}
 	if r.URL.Path == "/" || r.URL.Path == "/health-check" {
 		fmt.Fprint(w, "OK")
 		return
 	}
-
-	var h http.Handler = http.HandlerFunc(p.serveImage)
-	if p.Timeout > 0 {
-		h = tphttp.TimeoutHandler(h, p.Timeout, "Gateway timeout waiting for remote resource.")
+	p.prepare()
+	select {
+	case p.slots <- struct{}{}:
+		defer func() { <-p.slots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "too many active image requests", http.StatusServiceUnavailable)
+		return
 	}
-
-	h.ServeHTTP(w, r)
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	policy := p.fetchPolicy()
+	ctx = context.WithValue(ctx, fetchPolicyKey{}, policy)
+	p.serveImage(w, r.WithContext(ctx))
 }
 
 // serveImage handles incoming requests for proxied images.
 func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 	req, err := NewRequest(r, p.DefaultBaseURL)
 	if err != nil {
-		msg := fmt.Sprintf("invalid request URL: %v", err)
-		p.log(msg)
-		http.Error(w, msg, http.StatusBadRequest)
+		http.Error(w, "invalid request URL", http.StatusBadRequest)
 		return
 	}
-
-	// assign static settings from proxy to req.Options
+	policy := policyFromContext(r.Context())
+	if err := policy.checkURL(req.URL); err != nil {
+		p.writeError(w, err)
+		return
+	}
+	if len(p.SignatureKeys) > 0 {
+		valid := false
+		for _, key := range p.SignatureKeys {
+			if len(key) > 0 && validSignature(key, req) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			p.writeError(w, errUnsafeURL)
+			return
+		}
+	}
 	req.Options.ScaleUp = p.ScaleUp
-
-	actualReq, _ := http.NewRequest("GET", req.String(), nil)
+	actualReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, req.String(), nil)
+	if err != nil {
+		http.Error(w, "invalid request URL", http.StatusBadRequest)
+		return
+	}
 	if len(p.ContentTypes) != 0 {
 		actualReq.Header.Set("Accept", strings.Join(p.ContentTypes, ", "))
 	}
-	if len(p.PassRequestHeaders) != 0 {
-		copyHeader(actualReq.Header, r.Header, p.PassRequestHeaders...)
-	}
-	if p.FollowRedirects {
-		// FollowRedirects is true (default), ensure that the redirected host is allowed
-		p.Client.CheckRedirect = func(newreq *http.Request, via []*http.Request) error {
-			if len(via) > maxRedirects {
-				if p.Verbose {
-					p.logf("followed too many redirects (%d).", len(via))
-				}
-				return errTooManyRedirects
-			}
-			return nil
-		}
-	} else {
-		// FollowRedirects is false, don't follow redirects
-		p.Client.CheckRedirect = func(newreq *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-	}
-	resp, err := p.Client.Do(actualReq)
-
+	copyHeader(actualReq.Header, r.Header, p.PassRequestHeaders...)
+	client := clientForRequest(p.client, policy)
+	resp, err := client.Do(actualReq)
 	if err != nil {
-		msg := fmt.Sprintf("error fetching remote image: %v", err)
-		p.log(msg)
-		http.Error(w, msg, http.StatusInternalServerError)
+		p.writeError(w, err)
 		return
 	}
-	// close the original resp.Body, even if we wrap it in a NopCloser below
 	defer resp.Body.Close()
-
-	// return early on 404s.  Perhaps handle additional status codes here?
 	if resp.StatusCode == http.StatusNotFound {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-
-	cached := resp.Header.Get(httpcache.XFromCache) == "1"
-	if p.Verbose {
-		p.logf("request: %+v (served from cache: %t)", *actualReq, cached)
-	}
-
-	copyHeader(w.Header(), resp.Header, "Cache-Control", "Last-Modified", "Expires", "Etag", "Link")
-
 	if should304(r, resp) {
+		copyHeader(w.Header(), resp.Header, "Cache-Control", "Last-Modified", "Expires", "Etag")
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
-	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if contentType == "" || contentType == "application/octet-stream" || contentType == "binary/octet-stream" {
-		// try to detect content type
-		b := bufio.NewReader(resp.Body)
-		resp.Body = io.NopCloser(b)
-		contentType = peekContentType(b)
-	}
-	if resp.ContentLength != 0 && !contentTypeMatches(p.ContentTypes, contentType) {
-		p.logf("content-type not allowed: %q", contentType)
-		http.Error(w, msgNotAllowed, http.StatusForbidden)
+	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: policy.maxBytes}
+	if err := policy.checkResponse(resp); err != nil {
+		p.writeError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
-
-	copyHeader(w.Header(), resp.Header, "Content-Length")
-
-	// Enable CORS for 3rd party applications
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	// Add a Content-Security-Policy to prevent stored-XSS attacks via SVG files
-	w.Header().Set("Content-Security-Policy", "script-src 'none'")
-
-	// Disable Content-Type sniffing
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	// Block potential XSS attacks especially in legacy browsers which do not support CSP
-	w.Header().Set("X-XSS-Protection", "1; mode=block")
-
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		p.logf("error copying response: %v", err)
+	data, err := readResponse(r.Context(), resp.Body, policy.maxBytes)
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && len(data) > 0 {
+		// Cached output must obey the current pixel/frame budget, too.
+		_, err = transformWithLimits(r.Context(), data, Options{}, policy.maxPixels, policy.maxFrames, policy.maxBytes)
 	}
+	if err != nil {
+		p.writeError(w, err)
+		return
+	}
+	if err := r.Context().Err(); err != nil {
+		p.writeError(w, err)
+		return
+	}
+	copyHeader(w.Header(), resp.Header, "Cache-Control", "Last-Modified", "Expires", "Etag")
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(resp.StatusCode)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
+	}
+}
+
+func (p *Proxy) writeError(w http.ResponseWriter, err error) {
+	status := http.StatusBadGateway
+	switch {
+	case errors.Is(err, errUnsafeURL), errors.Is(err, errContentType):
+		status = http.StatusForbidden
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		status = http.StatusGatewayTimeout
+	case errors.Is(err, ErrResponseTooLarge), errors.Is(err, ErrImageTooLarge), errors.Is(err, ErrTooManyFrames):
+		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, ErrInvalidDimensions):
+		status = http.StatusBadRequest
+	}
+	if p.Verbose {
+		p.logf("image request failed: %v", err)
+	}
+	http.Error(w, http.StatusText(status), status)
 }
 
 // peekContentType peeks at the first 512 bytes of p, and attempts to detect
@@ -264,11 +306,13 @@ func contentTypeMatches(patterns []string, contentType string) bool {
 
 // hostMatches returns whether the host in u matches one of hosts.
 func hostMatches(hosts []string, u *url.URL) bool {
+	hostname := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 	for _, host := range hosts {
-		if u.Hostname() == host {
+		host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+		if hostname == host {
 			return true
 		}
-		if strings.HasPrefix(host, "*.") && strings.HasSuffix(u.Hostname(), host[2:]) {
+		if strings.HasPrefix(host, "*.") && (hostname == host[2:] || strings.HasSuffix(hostname, "."+host[2:])) {
 			return true
 		}
 		// Checks whether the host in u is an IP
@@ -305,7 +349,6 @@ func validSignature(key []byte, r *Request) bool {
 
 	got, err := base64.URLEncoding.DecodeString(sig)
 	if err != nil {
-		log.Printf("error base64 decoding signature %q", r.Options.Signature)
 		return false
 	}
 
@@ -389,54 +432,56 @@ type TransformingTransport struct {
 
 // RoundTrip implements the http.RoundTripper interface.
 func (t *TransformingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	policy := policyFromContext(req.Context())
+	if err := policy.checkURL(req.URL); err != nil {
+		return nil, err
+	}
 	if req.URL.Fragment == "" {
-		// normal requests pass through
-		if t.log != nil {
-			t.log("fetching remote URL: %v", req.URL)
-		}
 		return t.Transport.RoundTrip(req)
 	}
 
-	f := req.URL.Fragment
-	req.URL.Fragment = ""
-	resp, err := t.CachingClient.Do(req)
-	req.URL.Fragment = f
+	// RoundTrippers must not mutate their caller's request or URL.
+	rawReq := req.Clone(req.Context())
+	rawReq.URL.Fragment = ""
+	client := clientForRequest(t.CachingClient, policy)
+	resp, err := client.Do(rawReq)
 	if err != nil {
 		return nil, err
 	}
-
 	defer resp.Body.Close()
-
 	if should304(req, resp) {
-		// bare 304 response, full response will be used from cache
-		return &http.Response{StatusCode: http.StatusNotModified}, nil
+		return &http.Response{StatusCode: http.StatusNotModified, Header: resp.Header.Clone(), Body: http.NoBody, Request: req}, nil
 	}
-
-	b, err := io.ReadAll(resp.Body)
+	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: policy.maxBytes}
+	if err := policy.checkResponse(resp); err != nil {
+		return nil, err
+	}
+	b, err := readResponse(req.Context(), resp.Body, policy.maxBytes)
 	if err != nil {
 		return nil, err
 	}
-
-	opt := ParseOptions(req.URL.Fragment)
-
-	img, err := Transform(b, opt)
-	if err != nil {
-		log.Printf("error transforming image %s: %v", req.URL.String(), err)
-		img = b
+	img := b
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && len(b) > 0 {
+		img, err = transformWithLimits(req.Context(), b, ParseOptions(req.URL.Fragment), policy.maxPixels, policy.maxFrames, policy.maxBytes)
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	// replay response with transformed image and updated content length
-	buf := new(bytes.Buffer)
-	fmt.Fprintf(buf, "%s %s\n", resp.Proto, resp.Status)
-	if err := resp.Header.WriteSubset(buf, map[string]bool{
-		"Content-Length": true,
-		// exclude Content-Type header if the format may have changed during transformation
-		"Content-Type": opt.Format != "" || resp.Header.Get("Content-Type") == "image/webp" || resp.Header.Get("Content-Type") == "image/tiff",
-	}); err != nil {
-		t.log("error copying headers: %v", err)
+	if int64(len(img)) > policy.maxBytes {
+		return nil, ErrResponseTooLarge
 	}
-	fmt.Fprintf(buf, "Content-Length: %d\n\n", len(img))
-	buf.Write(img)
-
-	return http.ReadResponse(bufio.NewReader(buf), req)
+	result := new(http.Response)
+	*result = *resp
+	result.Header = resp.Header.Clone()
+	result.Body = io.NopCloser(bytes.NewReader(img))
+	result.ContentLength = int64(len(img))
+	result.Header.Set("Content-Length", fmt.Sprint(len(img)))
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && len(img) > 0 {
+		_, format, err := image.DecodeConfig(bytes.NewReader(img))
+		if err != nil {
+			return nil, err
+		}
+		result.Header.Set("Content-Type", "image/"+format)
+	}
+	return result, nil
 }

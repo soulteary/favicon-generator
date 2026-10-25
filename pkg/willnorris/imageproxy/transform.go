@@ -5,6 +5,7 @@ package imageproxy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif" // register gif format
@@ -18,10 +19,10 @@ import (
 	"github.com/muesli/smartcrop"
 	"github.com/muesli/smartcrop/nfnt"
 	"github.com/rwcarlsen/goexif/exif"
+	"github.com/willnorris/gifresize"
 	"golang.org/x/image/bmp"    // register bmp format
 	"golang.org/x/image/tiff"   // register tiff format
 	_ "golang.org/x/image/webp" // register webp format
-	"github.com/willnorris/gifresize"
 )
 
 // default compression quality of resized jpegs
@@ -37,14 +38,64 @@ var resampleFilter = imaging.Lanczos
 // encoded image in one of the supported formats (gif, jpeg, or png).  The
 // bytes of a similarly encoded image is returned.
 func Transform(img []byte, opt Options) ([]byte, error) {
+	return TransformWithLimits(context.Background(), img, opt, DefaultMaxPixels, DefaultMaxFrames)
+}
+
+// TransformWithLimits transforms an image after checking its decoded dimensions,
+// animation frame count, and the dimensions of intermediate and output images.
+// For animations, maxPixels also bounds the sum of full-canvas frame pixels.
+// Non-positive limits select the safe defaults. Cancellation is checked around
+// image operations and during decoding and encoding.
+func TransformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels int64, maxFrames int) ([]byte, error) {
+	return transformWithLimits(ctx, img, opt, maxPixels, maxFrames, DefaultMaxResponseBytes)
+}
+
+func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels int64, maxFrames int, maxBytes int64) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if maxPixels <= 0 {
+		maxPixels = DefaultMaxPixels
+	}
+	if maxFrames <= 0 {
+		maxFrames = DefaultMaxFrames
+	}
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxResponseBytes
+	}
+	if int64(len(img)) > maxBytes {
+		return nil, ErrResponseTooLarge
+	}
+	if err := validateOptions(opt); err != nil {
+		return nil, err
+	}
+	config, format, err := image.DecodeConfig(contextReader{ctx, bytes.NewReader(img)})
+	if err != nil {
+		return nil, err
+	}
+	if err := checkPixels(config.Width, config.Height, maxPixels); err != nil {
+		return nil, err
+	}
+	frames := 1
+	if format == "gif" {
+		frames, err = checkGIF(ctx, img, maxPixels, maxFrames)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if !opt.transform() {
-		// bail if no transformation was requested
-		return img, nil
+		return img, ctx.Err()
 	}
 
 	// decode image
-	m, format, err := image.Decode(bytes.NewReader(img))
+	m, _, err := image.Decode(contextReader{ctx, bytes.NewReader(img)})
 	if err != nil {
+		return nil, err
+	}
+	if err := checkPixels(m.Bounds().Dx(), m.Bounds().Dy(), maxPixels); err != nil {
 		return nil, err
 	}
 
@@ -68,18 +119,24 @@ func Transform(img []byte, opt Options) ([]byte, error) {
 
 	// transform and encode image
 	buf := new(bytes.Buffer)
+	w := contextWriter{ctx, &boundedWriter{w: buf, remaining: maxBytes}}
+	if format != "gif" {
+		m, err = transformImageWithLimits(ctx, m, opt, maxPixels)
+		if err != nil {
+			return nil, err
+		}
+	}
 	switch format {
 	case "bmp":
-		m = transformImage(m, opt)
-		err = bmp.Encode(buf, m)
+		err = bmp.Encode(w, m)
 		if err != nil {
 			return nil, err
 		}
 	case "gif":
-		fn := func(img image.Image) image.Image {
-			return transformImage(img, opt)
+		fn := func(img image.Image) (image.Image, error) {
+			return transformImageWithLimits(ctx, img, opt, maxPixels/int64(frames))
 		}
-		err = gifresize.Process(buf, bytes.NewReader(img), fn)
+		err = gifresize.ProcessWithContext(ctx, w, contextReader{ctx, bytes.NewReader(img)}, fn)
 		if err != nil {
 			return nil, err
 		}
@@ -89,20 +146,17 @@ func Transform(img []byte, opt Options) ([]byte, error) {
 			quality = defaultQuality
 		}
 
-		m = transformImage(m, opt)
-		err = jpeg.Encode(buf, m, &jpeg.Options{Quality: quality})
+		err = jpeg.Encode(w, m, &jpeg.Options{Quality: quality})
 		if err != nil {
 			return nil, err
 		}
 	case "png":
-		m = transformImage(m, opt)
-		err = png.Encode(buf, m)
+		err = png.Encode(w, m)
 		if err != nil {
 			return nil, err
 		}
 	case "tiff":
-		m = transformImage(m, opt)
-		err = tiff.Encode(buf, m, &tiff.Options{Compression: tiff.Deflate, Predictor: true})
+		err = tiff.Encode(w, m, &tiff.Options{Compression: tiff.Deflate, Predictor: true})
 		if err != nil {
 			return nil, err
 		}
@@ -110,6 +164,9 @@ func Transform(img []byte, opt Options) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported format: %v", format)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
@@ -268,6 +325,29 @@ func transformImage(m image.Image, opt Options) image.Image {
 	// size of the original image.
 	rect := cropParams(m, opt)
 	w, h, resize := resizeParams(m, opt)
+	return transformImageParams(m, opt, rect, w, h, resize)
+}
+
+func transformImageWithLimits(ctx context.Context, m image.Image, opt Options, maxPixels int64) (image.Image, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rect := cropParams(m, opt).Intersect(m.Bounds())
+	w, h, resize := resizeParams(m, opt)
+	if err := checkTransformPixels(rect, w, h, resize, opt.Fit, maxPixels); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m = transformImageParams(m, opt, rect, w, h, resize)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func transformImageParams(m image.Image, opt Options, rect image.Rectangle, w, h int, resize bool) image.Image {
 
 	// crop if needed
 	if !m.Bounds().Eq(rect) {
