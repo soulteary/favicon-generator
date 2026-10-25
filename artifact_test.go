@@ -217,8 +217,10 @@ func TestArtifactZIPDirectoryParsingBound(t *testing.T) {
 		}
 	}
 	for _, mutate := range []func([]byte){
-		func(b []byte) { b[len(b)-22+12] ^= 1 }, // understated directory size
-		func(b []byte) { b[len(b)-22+16] ^= 1 }, // shifted base offset
+		func(b []byte) { b[len(b)-22+12] ^= 1 },                                     // understated directory size
+		func(b []byte) { b[len(b)-22+16] ^= 1 },                                     // shifted base offset
+		func(b []byte) { binary.LittleEndian.PutUint32(b[len(b)-22+12:], 1<<32-1) }, // ZIP64 size sentinel
+		func(b []byte) { binary.LittleEndian.PutUint32(b[len(b)-22+16:], 1<<32-1) }, // ZIP64 offset sentinel
 		func(b []byte) {
 			offset := binary.LittleEndian.Uint32(b[len(b)-22+16:])
 			binary.LittleEndian.PutUint16(b[offset+28:offset+30], 65535)
