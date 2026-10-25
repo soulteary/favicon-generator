@@ -15,15 +15,102 @@ version for production builds.
 go run . -cache memory:100:1h
 ```
 
-The service listens on `localhost:8080`. Request a remote image with optional
-transforms in the path, for example:
+The image service listens on `localhost:8080`; a separate management listener
+uses `localhost:9090`. Request a remote image with optional transforms in the
+path, for example:
 
 ```text
 http://localhost:8080/32x32,png/https://example.com/logo.png
 ```
 
-`/health-check` returns `OK`. The current implementation is an image processing
-service; ICO generation and application icon bundles are not implemented yet.
+The current implementation is an image processing service; ICO generation and
+application icon bundles are not implemented yet.
+
+Print build information without starting either listener:
+
+```sh
+go run . -version
+```
+
+Normal development builds report `dev`. Release builds can set the fields used
+by version-kit:
+
+```sh
+go build -ldflags '-X github.com/soulteary/version-kit/v4.Version=1.0.0 -X github.com/soulteary/version-kit/v4.Commit=COMMIT -X github.com/soulteary/version-kit/v4.BuildDate=BUILD_DATE' -o favicon-generator .
+```
+
+## Configuration
+
+Explicit command-line flags take precedence over their `IMAGEPROXY_`
+environment variables; unset values use defaults. Environment names use the
+uppercase flag name without added separators, for example
+`IMAGEPROXY_ADMINADDR`, `IMAGEPROXY_SHUTDOWNTIMEOUT` and `IMAGEPROXY_LOGLEVEL`.
+An explicitly empty value is applied, so `-adminAddr=''` or an empty
+`IMAGEPROXY_ADMINADDR` disables the management listener. CLI cache flags replace
+the environment's cache configuration rather than adding tiers to it.
+
+Malformed flags, positional arguments, invalid environment values, unsupported
+log levels, invalid listener/base URL/allowlist syntax and unsafe resource
+limits fail startup. Configuration errors omit input values, including credentials.
+An invalid lower-priority environment value is ignored when that option was
+explicitly supplied on the command line. `-version` does not consult unrelated
+environment settings or start the service.
+
+Caching is disabled unless configured. `-cache memory` selects 100 MB;
+`-cache memory:100:1h` sets a capacity of 100,000,000 bytes and a one-hour age.
+Repeat `-cache` for additional memory tiers, or put space-separated tiers in
+`IMAGEPROXY_CACHE`. Capacities must be positive integer MB values without
+overflow. An omitted or zero age disables expiration; positive fractional
+seconds are rounded up to whole seconds. Unsupported backends, negative ages
+and malformed cache specifications are rejected.
+
+Run `go run . -h` for all options and their environment names.
+
+## Health, metrics and logs
+
+The public listener accepts `GET` and `HEAD` on these health routes:
+
+- `/health-check`: the compatible plain-text `OK` liveness response.
+- `/livez`: a JSON liveness response.
+- `/readyz`: a JSON readiness response; returns `503` until startup completes
+  and when shutdown begins.
+
+Readiness becomes healthy only after every configured listener has bound. It
+reflects the service lifecycle, rather than fetching an external image. The
+management listener serves `/metrics`, `/livez` and `/readyz`; `/metrics` is
+unavailable on the public listener. Keep the management listener on a trusted
+network if changing its default loopback address. It has no application-level
+authentication and no runtime log-level mutation endpoint.
+
+```sh
+curl http://localhost:8080/readyz
+curl http://localhost:9090/metrics
+```
+
+Prometheus metrics use a service-owned registry with the
+`favicon_generator_http_` prefix. They include request counts, latency, in-flight
+requests and request/response sizes. Labels use fixed route names, bounded HTTP
+method categories and response status codes; source URLs, query values and
+signatures are never label values. Scraping `/metrics` does not record another
+HTTP observation.
+
+Logs are structured JSON written to standard error. `-logLevel info` is the
+default; successful access events require `debug` or `trace`, while HTTP errors
+are logged at `warn`. `-verbose` promotes `info` to `debug`; other selected log
+levels are retained.
+Request logs contain only a fixed route, method, status and duration. Internal
+proxy and HTTP-server diagnostic text is omitted because it can contain source
+URLs, signatures or panic values.
+
+## Shutdown
+
+`SIGINT` and `SIGTERM` first clear readiness and stop admitting requests. Both
+HTTP servers drain concurrently within `-shutdownTimeout 15s`. If that grace
+period expires, the service cancels active request contexts and closes the
+connections, then waits for admitted handlers and server workers to finish.
+An image operation already running may need to reach its cancellation boundary;
+the grace period is not a hard process-exit deadline. If either listener fails
+to bind, any listeners already opened are closed and startup fails.
 
 ## Security and resource limits
 
@@ -72,11 +159,9 @@ validation before image decoding: actual VP8/VP8L dimensions must fit the pixel
 budget and agree with the VP8X canvas. Malformed, truncated or inconsistent
 headers are rejected, including when no transformation was requested.
 
-Flags can also be configured through `IMAGEPROXY_` environment variables using
-uppercase flag names, such as `IMAGEPROXY_MAXPIXELS` and `IMAGEPROXY_ALLOWHOSTS`.
-Run `go run . -h` for all options. Configure embedded `imageproxy.Proxy` instances
-before serving requests. Custom transports must enforce connection-time address
-checks equivalent to the default transport.
+Configure embedded `imageproxy.Proxy` instances before serving requests. Custom
+transports must enforce connection-time address checks equivalent to the default
+transport.
 
 ## Test
 
@@ -104,7 +189,11 @@ the program are outside that scan.
 Only `imageproxy` and `gifresize` remain as local forks: they contain the proxy
 security controls and cancellable GIF processing maintained in this repository.
 Their regression suites run independently in CI alongside the main program.
-Other image and cache libraries use versioned upstream Go modules.
+Other image and cache libraries use versioned upstream Go modules. The executable
+uses version-kit/v4 for build information, health-kit/v4 for lifecycle probes,
+logger-kit/v3 for structured logs and metrics-kit/v3 for its private Prometheus
+registry. These service integrations leave the image proxy's security and
+resource-limit chain in place.
 
 The local `replace` directives for these two forks have no replacement version
 metadata, so they are not fully covered by vulnerability version matching. A passing
