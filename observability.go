@@ -81,6 +81,8 @@ func (o *observability) SetReady(ready bool) { o.ready.Store(ready) }
 func (o *observability) PublicHandler(proxy http.Handler) http.Handler {
 	image := o.observe("image", proxy)
 	icons := o.observe("icons", proxy)
+	ui := o.observe("ui", proxy)
+	assets := o.observe("assets", proxy)
 	health := o.management("health", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Length", "2")
@@ -92,6 +94,8 @@ func (o *observability) PublicHandler(proxy http.Handler) http.Handler {
 	// URL embedded in an imageproxy path, for example /png/https://host/image.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/":
+			ui.ServeHTTP(w, r)
 		case "/health-check":
 			health.ServeHTTP(w, r)
 		case "/livez":
@@ -103,6 +107,10 @@ func (o *observability) PublicHandler(proxy http.Handler) http.Handler {
 			// proxy BaseURL, even when the public listener has no metrics page.
 			http.NotFound(w, r)
 		default:
+			if r.URL.Path == "/assets" || strings.HasPrefix(r.URL.Path, "/assets/") {
+				assets.ServeHTTP(w, r)
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, "/icons/") {
 				icons.ServeHTTP(w, r)
 				return

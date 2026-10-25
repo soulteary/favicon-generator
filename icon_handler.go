@@ -16,6 +16,9 @@ import (
 type iconHandler struct{ proxy *imageproxy.Proxy }
 
 func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if serveUI(w, r) {
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, "/icons/") {
 		h.proxy.ServeHTTP(w, r)
 		return
