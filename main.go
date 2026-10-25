@@ -72,5 +72,6 @@ func run(ctx context.Context, args []string, lookupEnv func(string) (string, boo
 		return err
 	}
 	// serve returns after all admitted handlers have drained.
-	return errors.Join(serve(ctx, cfg, obs, &iconHandler{proxy: p, artifacts: artifacts}), artifacts.Close())
+	serveErr := serve(ctx, cfg, obs, &iconHandler{proxy: p, artifacts: artifacts})
+	return errors.Join(serveErr, artifacts.Close())
 }
