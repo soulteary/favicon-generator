@@ -111,3 +111,21 @@ the suite exercises ACL and CLIENT PAUSE, as described in [redis-cache.md](redis
 REDIS_TEST_ADDR=127.0.0.1:6379 REDIS_TEST_REQUIRED=1 \
   go test -mod=readonly -race -count=1 -timeout=2m -run '^TestRedisArtifactKit' .
 ```
+
+## Recorded integrated run
+
+The assembled branch passed all three modules' race tests, vet and build, the
+complete real-Redis suite, 18 frontend regressions, and a main-entry govulncheck
+v1.9.0 scan with Go 1.27.3. The final ZIP64 guard then passed the ZIP and complete
+Kit integration regressions, including real Redis, at measured revision
+`d264652c75e3eaf8a9b16b99bec339373be19727`. After all parallel test work finished,
+that revision ran the 20 benchmark cases three times with
+`GOMAXPROCS=2 BENCHTIME=1s BENCHCOUNT=3`. All 60 samples passed.
+
+[The measured artifact medians and complete raw output](benchmarks.md#integrated-kit-baseline-2026-10-25)
+separate Off, MemoryCold and MemoryWarm for all four workloads. LegacyPNG remains
+a control with no artifact-cache decisions. The warm browser flow recorded seven
+artifact hits, source preflight and response writes, and no transform/encode/pack
+operations. These memory-backend handler results are not Redis or browser-rendering
+performance measurements. The earlier 24-sample source-cache baseline remains a
+historical record of its own revision.
