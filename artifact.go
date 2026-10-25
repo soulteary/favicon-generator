@@ -208,6 +208,16 @@ func validateArtifact(ctx context.Context, entry artifactEntry, key, filename st
 			return err
 		}
 	} else {
+		// Our fixed eight-file ZIP has no comment or ZIP64 directory. Check its
+		// bounded entry count before archive/zip can allocate a directory from
+		// a forged count in a corrupted cache value.
+		if len(entry.Body) < 22 || !bytes.Equal(entry.Body[:4], []byte{'P', 'K', 3, 4}) {
+			return errInvalidArtifact
+		}
+		tail := entry.Body[len(entry.Body)-22:]
+		if !bytes.Equal(tail[:4], []byte{'P', 'K', 5, 6}) || binary.LittleEndian.Uint16(tail[4:6]) != 0 || binary.LittleEndian.Uint16(tail[6:8]) != 0 || binary.LittleEndian.Uint16(tail[8:10]) != 8 || binary.LittleEndian.Uint16(tail[10:12]) != 8 || binary.LittleEndian.Uint16(tail[20:22]) != 0 {
+			return errInvalidArtifact
+		}
 		archive, err := zip.NewReader(bytes.NewReader(entry.Body), int64(len(entry.Body)))
 		if err != nil || len(archive.File) != 8 {
 			return errInvalidArtifact
