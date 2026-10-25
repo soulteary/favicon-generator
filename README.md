@@ -23,8 +23,15 @@ path, for example:
 http://localhost:8080/32x32,png/https://example.com/logo.png
 ```
 
-The current implementation is an image processing service; ICO generation and
-application icon bundles are not implemented yet.
+Download a complete icon package from one source image:
+
+```sh
+curl --get 'http://localhost:8080/icons/icons.zip' \
+  --data-urlencode 'url=https://example.com/logo.png' \
+  --data-urlencode 'name=Example App' \
+  --data-urlencode 'shortName=Example' \
+  --output icons.zip
+```
 
 Print build information without starting either listener:
 
@@ -38,6 +45,58 @@ by version-kit:
 ```sh
 go build -ldflags '-X github.com/soulteary/version-kit/v4.Version=1.0.0 -X github.com/soulteary/version-kit/v4.Commit=COMMIT -X github.com/soulteary/version-kit/v4.BuildDate=BUILD_DATE' -o favicon-generator .
 ```
+
+## Icon downloads
+
+The public listener provides `GET` and `HEAD` downloads under `/icons/`:
+
+- `favicon.ico`: one ICO containing 16, 32, 48 and 256 pixel images, using
+  PNG-compressed 32-bit RGBA frames.
+- `favicon-16x16.png`, `favicon-32x32.png`, `favicon-48x48.png`: square PNG favicons.
+- `apple-touch-icon.png`: a 180 pixel PNG.
+- `android-chrome-192x192.png`, `android-chrome-512x512.png`: app icon PNGs.
+- `site.webmanifest`: JSON manifest with 192 and 512 pixel icon references.
+- `icons.zip`: all eight files above, with a manifest suitable for deployment.
+
+Every endpoint requires a `url` query parameter containing an absolute HTTP(S)
+source URL. Encode the parameter with `--data-urlencode` or a URL query builder
+so source query strings are preserved. When signature keys are configured, add
+`s` containing the URL-safe base64 HMAC-SHA256 of the original source URL,
+without transform options. The signature and allowlist checks also apply to
+manifest requests. Existing imageproxy paths and their signature syntax continue
+to work.
+
+Only ZIP and manifest requests accept optional `name` and `shortName`
+parameters, both defaulting to `App`. They must be nonblank UTF-8 strings of at
+most 128 and 32 characters respectively, without control characters. Unknown or
+repeated parameters and oversized queries return `400`. Filenames and output
+sizes are fixed.
+
+Images retain their proportions and are centered on a transparent square. Small
+sources are enlarged to produce the exact requested dimensions, independently
+of the proxy's `-scaleUp` option. JPEG/TIFF orientation is applied. Animated GIFs
+use the first frame after checking the complete source's frame and pixel
+budgets. Each download retrieves the source once and derives the requested sizes
+from one normalized image.
+
+The standalone manifest links back to the generator's PNG endpoints, preserving
+the source URL and signature in those links. The ZIP manifest uses relative
+filenames and retains no source URL or signature; extract all files into the
+same directory on your website. Both manifests declare icon purpose `any` and
+display mode `standalone`; configure your application's `start_url`, scope and
+other metadata when deploying. For files deployed at the website root:
+
+```html
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+```
+
+Downloads use `private, no-store` responses because their source URLs or manifest
+links can contain credentials. `HEAD` validates and generates the same artifact
+as `GET`, returns its headers and omits the body. ZIP downloads have a fixed
+`icons.zip` attachment filename. No files are written to disk.
 
 ## Configuration
 
@@ -151,6 +210,17 @@ disallowed origins or content types return `403`, invalid dimensions return
 Only supported raster image formats are accepted; invalid image data fails
 instead of silently returning an untransformed image.
 
+Icon generation shares the image proxy's concurrency slots, source cache,
+origin restrictions, redirect budget and deadline. The slot and deadline cover
+the complete download, image conversion, ICO encoding and ZIP creation.
+`maxPixels` also bounds the sum of unique generated square sizes (400,528 pixels
+for a complete package), rather than just its largest PNG. `maxResponseBytes`
+bounds the aggregate staged PNG/ICO/manifest bytes, the ZIP's uncompressed
+members, and the final encoded download. Generation rejects over-budget output
+before growing its buffers. A lowered limit can therefore allow an individual
+PNG while rejecting a complete ICO or ZIP. Each in-memory package is isolated
+to its request and contains only the eight fixed filenames.
+
 Image decoding uses `golang.org/x/image` v0.47.0, which includes fixes for known
 TIFF metadata, tile and decompression allocation issues and excessive VP8L
 Huffman table allocation. Pixel limits alone do not protect against allocations
@@ -194,6 +264,11 @@ uses version-kit/v4 for build information, health-kit/v4 for lifecycle probes,
 logger-kit/v3 for structured logs and metrics-kit/v3 for its private Prometheus
 registry. These service integrations leave the image proxy's security and
 resource-limit chain in place.
+
+vfs-kit v1.4.6 provides the request-local in-memory file tree and ZIP writer.
+It has no third-party dependencies. A separate memfs-kit dependency is
+unnecessary for this packaging path; cache capacity and TTL continue to be
+managed by the existing LRU.
 
 The local `replace` directives for these two forks have no replacement version
 metadata, so they are not fully covered by vulnerability version matching. A passing
