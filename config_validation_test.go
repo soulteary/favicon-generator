@@ -81,6 +81,7 @@ func TestConfigAllExplicitValuesSkipEnvironmentLookup(t *testing.T) {
 		"-artifactRedisAddr=localhost:6379", "-artifactRedisUsername=", "-artifactRedisPassword=", "-artifactRedisDB=0",
 		"-artifactRedisPrefix=favicon:artifacts:v1:", "-artifactRedisTimeout=250ms", "-artifactRedisTLS=false", "-artifactRedisCAFile=", "-artifactRedisServerName=",
 		"-timeout=2s", "-shutdownTimeout=1ns", "-maxResponseBytes=64", "-maxPixels=8", "-maxFrames=1", "-maxConcurrent=1",
+		"-artifactCache=off", "-artifactCacheBytes=4096", "-artifactCacheEntryBytes=64", "-artifactCacheTTL=1m",
 	}, func(key string) (string, bool) {
 		t.Errorf("explicit CLI option consulted lower-priority environment %s", key)
 		return "SECRET_INVALID_ENV", true
