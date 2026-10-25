@@ -11,6 +11,6 @@ export GOWORK=off
 export GOPROXY=off
 
 go version
-go test -mod=readonly -run '^$' -bench "${BENCHMARK_PATTERN:-^BenchmarkPipeline$}" \
+go test -mod=readonly -run '^$' -bench "${BENCHMARK_PATTERN:-^Benchmark(Pipeline|ArtifactPipeline)$}" \
   -benchmem -benchtime "${BENCHTIME:-1s}" -count "${BENCHCOUNT:-3}" \
   -timeout 10m "$@" .

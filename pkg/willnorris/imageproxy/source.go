@@ -67,6 +67,7 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 	case p.slots <- struct{}{}:
 		defer func() { <-p.slots }()
 	default:
+		observeAdmissionRejected(ctx, "busy")
 		return ErrSourceBusy
 	}
 	timeout := p.Timeout

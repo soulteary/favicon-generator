@@ -76,6 +76,7 @@ type pipelineBenchmarkFixture struct {
 	fetches   atomic.Int64
 	metrics   prometheus.Gatherer
 	artifacts *memoryArtifactStore
+	observer  *observability
 }
 
 func newPipelineBenchmarkFixture(tb testing.TB, artifactEnabled ...bool) *pipelineBenchmarkFixture {
@@ -120,13 +121,17 @@ func newPipelineBenchmarkFixture(tb testing.TB, artifactEnabled ...bool) *pipeli
 	proxy := imageproxy.NewProxy(transport, fixture.cache)
 	proxy.Logger = observability.ProxyLogger
 	handler := &iconHandler{proxy: proxy}
-	if len(artifactEnabled) > 0 && artifactEnabled[0] {
-		store, err := newMemoryArtifactStore(defaultArtifactCacheBytes, defaultArtifactCacheEntryBytes, defaultArtifactCacheTTL)
-		if err != nil {
-			tb.Fatal(err)
+	if len(artifactEnabled) > 0 {
+		var store artifactStore
+		backend := "off"
+		if artifactEnabled[0] {
+			memory, err := newMemoryArtifactStore(defaultArtifactCacheBytes, defaultArtifactCacheEntryBytes, defaultArtifactCacheTTL)
+			if err != nil {
+				tb.Fatal(err)
+			}
+			fixture.artifacts, store, backend = memory, memory, "memory"
 		}
-		service := newArtifactService(store, "memory", defaultArtifactCacheTTL, defaultArtifactCacheEntryBytes, observability.artifactCache.Observe)
-		fixture.artifacts = store
+		service := newArtifactService(store, backend, defaultArtifactCacheTTL, defaultArtifactCacheEntryBytes, observability.artifactCache.Observe)
 		handler.artifacts = service
 		tb.Cleanup(func() {
 			if err := service.Close(); err != nil {
@@ -136,6 +141,7 @@ func newPipelineBenchmarkFixture(tb testing.TB, artifactEnabled ...bool) *pipeli
 	}
 	fixture.handler = observability.PublicHandler(handler)
 	fixture.metrics = observability.metrics.Registry.Gatherer()
+	fixture.observer = observability
 	return fixture
 }
 
@@ -172,6 +178,28 @@ func (f *pipelineBenchmarkFixture) stageSums(tb testing.TB) map[string]float64 {
 func (f *pipelineBenchmarkFixture) resetCounters() {
 	f.fetches.Store(0)
 	f.cache.hits.Store(0)
+}
+
+func (f *pipelineBenchmarkFixture) artifactCounts(tb testing.TB) map[string]float64 {
+	tb.Helper()
+	counts := map[string]float64{"hit": 0, "miss": 0, "bypass": 0, "error": 0}
+	families, err := f.metrics.Gather()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "favicon_generator_artifact_cache_requests_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "result" {
+					counts[label.GetValue()] += metric.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return counts
 }
 
 func runPipelineBenchmarkWorkload(tb testing.TB, fixture *pipelineBenchmarkFixture, workload pipelineBenchmarkWorkload) {
@@ -293,15 +321,18 @@ func BenchmarkPipeline(b *testing.B) {
 // Source HTTP caching stays warm in all three modes. Only the finished artifact
 // cache changes, so the comparison measures real avoided rendering and packing.
 func BenchmarkArtifactPipeline(b *testing.B) {
-	for _, workload := range pipelineBenchmarkWorkloads()[1:] {
+	for _, workload := range pipelineBenchmarkWorkloads() {
 		for _, mode := range []string{"Off", "MemoryCold", "MemoryWarm"} {
 			b.Run(workload.name+"/"+mode, func(b *testing.B) {
 				b.StopTimer()
 				fixture := newPipelineBenchmarkFixture(b, mode != "Off")
 				runPipelineBenchmarkWorkload(b, fixture, workload)
+				runPipelineBenchmarkWorkload(b, fixture, workload)
 				before := fixture.stageSums(b)
+				beforeArtifacts := fixture.artifactCounts(b)
 				b.ReportAllocs()
 				b.ResetTimer()
+				var fetches, hits int64
 				for range b.N {
 					if mode == "MemoryCold" {
 						if err := fixture.artifacts.cache.Purge(); err != nil {
@@ -313,34 +344,74 @@ func BenchmarkArtifactPipeline(b *testing.B) {
 					runPipelineBenchmarkWorkload(b, fixture, workload)
 					b.StopTimer()
 					checkPipelineBenchmarkCounts(b, fixture, workload, false)
+					fetches += fixture.fetches.Load()
+					hits += fixture.cache.hits.Load()
 				}
+				b.ReportMetric(float64(fetches)/float64(b.N), "upstream_fetches/op")
+				b.ReportMetric(float64(hits)/float64(b.N), "cache_get_hits/op")
 				after := fixture.stageSums(b)
 				for _, stage := range pipelineBenchmarkStages {
 					b.ReportMetric((after[stage]-before[stage])*1e9/float64(b.N), stage+"_ns/op")
+				}
+				for result, count := range fixture.artifactCounts(b) {
+					b.ReportMetric((count-beforeArtifacts[result])/float64(b.N), "artifact_"+result+"/op")
 				}
 			})
 		}
 	}
 }
 
-func TestArtifactBenchmarkWarmSkipsRenderingAndPacking(t *testing.T) {
-	for _, workload := range pipelineBenchmarkWorkloads()[1:] {
-		t.Run(workload.name, func(t *testing.T) {
-			fixture := newPipelineBenchmarkFixture(t, true)
-			runPipelineBenchmarkWorkload(t, fixture, workload)
-			before := fixture.stageSums(t)
-			fixture.resetCounters()
-			runPipelineBenchmarkWorkload(t, fixture, workload)
-			after := fixture.stageSums(t)
-			checkPipelineBenchmarkCounts(t, fixture, workload, false)
-			for _, stage := range []string{"transform", "encode", "pack"} {
-				if after[stage] != before[stage] {
-					t.Fatalf("warm artifact repeated %s", stage)
+func TestArtifactBenchmarkCacheModes(t *testing.T) {
+	for _, workload := range pipelineBenchmarkWorkloads() {
+		for _, mode := range []string{"Off", "MemoryCold", "MemoryWarm"} {
+			t.Run(workload.name+"/"+mode, func(t *testing.T) {
+				fixture := newPipelineBenchmarkFixture(t, mode != "Off")
+				runPipelineBenchmarkWorkload(t, fixture, workload)
+				runPipelineBenchmarkWorkload(t, fixture, workload)
+				if mode == "MemoryCold" {
+					if err := fixture.artifacts.cache.Purge(); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			if after["write"] <= before["write"] || after["decode"] <= before["decode"] {
-				t.Fatal("warm artifact skipped source validation or response write")
-			}
-		})
+				pipeline := "icons"
+				if workload.name == "LegacyPNG" {
+					pipeline = "image"
+				}
+				counts := make(map[string]float64)
+				for _, stage := range pipelineBenchmarkStages {
+					counts[stage] = stageCount(t, fixture.observer, pipeline, stage, "success")
+				}
+				beforeArtifacts := fixture.artifactCounts(t)
+				fixture.resetCounters()
+				runPipelineBenchmarkWorkload(t, fixture, workload)
+				checkPipelineBenchmarkCounts(t, fixture, workload, false)
+				for _, stage := range []string{"transform", "encode", "pack"} {
+					wantWork := workload.name != "LegacyPNG" && mode != "MemoryWarm" && (stage != "pack" || workload.name == "ZIP" || workload.name == "BrowserFlow")
+					if (stageCount(t, fixture.observer, pipeline, stage, "success") > counts[stage]) != wantWork {
+						t.Fatalf("%s stage presence differs from mode %s", stage, mode)
+					}
+				}
+				if stageCount(t, fixture.observer, pipeline, "write", "success") <= counts["write"] || stageCount(t, fixture.observer, pipeline, "decode", "success") <= counts["decode"] {
+					t.Fatal("warm artifact skipped source validation or response write")
+				}
+				afterArtifacts := fixture.artifactCounts(t)
+				wantResult := "miss"
+				if mode == "Off" {
+					wantResult = "bypass"
+				}
+				if mode == "MemoryWarm" {
+					wantResult = "hit"
+				}
+				for result, count := range afterArtifacts {
+					want := float64(0)
+					if workload.name != "LegacyPNG" && result == wantResult {
+						want = float64(len(workload.requests))
+					}
+					if count-beforeArtifacts[result] != want {
+						t.Fatalf("artifact %s=%v, want %v", result, count-beforeArtifacts[result], want)
+					}
+				}
+			})
+		}
 	}
 }
