@@ -8,6 +8,7 @@ replace github.com/willnorris/gifresize => ./pkg/willnorris/gifresize
 
 require (
 	github.com/die-net/lrucache v0.0.0-20240714232319-26322ba4bc23
+	github.com/prometheus/client_golang v1.24.1
 	github.com/soulteary/health-kit/v4 v4.0.3
 	github.com/soulteary/logger-kit/v3 v3.0.3
 	github.com/soulteary/metrics-kit/v3 v3.0.3
@@ -28,7 +29,6 @@ require (
 	github.com/muesli/smartcrop v0.3.1-0.20230316170055-f1935b108c21 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
-	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.72.1 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -63,7 +64,7 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		links.Set("s", q.Get("s"))
 	}
 	committed := false
-	err = h.proxy.WithSource(r.Context(), source, q.Get("s"), func(ctx context.Context, data []byte, limits imageproxy.SourceLimits) error {
+	err = h.proxy.WithSource(r.Context(), source, q.Get("s"), func(ctx context.Context, data []byte, limits imageproxy.SourceLimits) (writeErr error) {
 		output, err := generateIcon(ctx, data, limits, filename, q.Get("name"), q.Get("shortName"), links)
 		if err != nil {
 			return err
@@ -71,6 +72,8 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		finishWrite := imageproxy.StartStage(ctx, "write")
+		defer func() { finishWrite(writeErr) }()
 		// Keep the shared admission slot until the download finishes. A slow
 		// reader must not accumulate completed buffers outside the image limit.
 		// The standard HTTP writer supports this deadline through our wrappers;
@@ -88,9 +91,15 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		committed = true
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {
-			_, err = w.Write(output)
+			n, err := w.Write(output)
+			if err != nil {
+				return err
+			}
+			if n != len(output) {
+				return io.ErrShortWrite
+			}
 		}
-		return err
+		return ctx.Err()
 	})
 	// A cancellation or write failure after headers cannot become an HTTP
 	// error body: appending text would corrupt a partial PNG/ICO/ZIP download.

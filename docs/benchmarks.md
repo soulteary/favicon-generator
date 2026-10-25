@@ -1,0 +1,166 @@
+# Pipeline and cache benchmarks
+
+The [recorded baseline](#recorded-baseline-2026-10-25) includes raw samples,
+environment details, and the measured source revision.
+
+Run the benchmarks with an installed Go 1.27.3 or later toolchain. Download the
+root module's dependencies once in a network-enabled environment, then run
+offline:
+
+```sh
+go mod download
+./scripts/benchmark.sh
+```
+
+The script disables toolchain switching and module downloads, uses
+`-mod=readonly`, and retains Go's normal checksum verification. Dependencies and
+their required checksum data must already be cached; missing prerequisites
+produce an error. The workloads do not fetch images, bind listeners or make
+DNS/network requests. No Node.js runtime or running service is required.
+
+Use the same machine, Go version, CPU allocation and flags when comparing runs:
+
+```sh
+GOMAXPROCS=2 BENCHTIME=2s BENCHCOUNT=5 ./scripts/benchmark.sh | tee /tmp/favicon-generator-bench.txt
+BENCHTIME=1x BENCHCOUNT=1 ./scripts/benchmark.sh
+BENCHMARK_PATTERN='^BenchmarkPipeline/BrowserFlow/' ./scripts/benchmark.sh -cpu=1
+```
+
+The default is three runs of every cold/warm case with Go's one-second benchmark
+target. `BENCHTIME`, `BENCHCOUNT` and `BENCHMARK_PATTERN` map to the corresponding
+Go benchmark flags; additional arguments are passed to `go test`. Use a single
+iteration for smoke checks, not to compare performance. GitHub Actions runs that
+smoke check on stable Go without an absolute timing threshold.
+
+## Workloads and timing
+
+All cases use the same generated 512 × 320 RGBA PNG with deterministic pixels
+and partial transparency, a fake `http.RoundTripper`, and the real 100 MB LRU
+cache. The origin response has a fresh `Date`, an ETag and
+`Cache-Control: public, max-age=86400`. This is a cacheable source, unlike an
+origin response that forbids caching. No artificial latency or sleeps are added.
+
+One benchmark operation means:
+
+- `LegacyPNG`: one `/32x32,png/https://benchmark.test/logo.png` request.
+- `IconPNG`: one `/icons/favicon-32x32.png` request.
+- `ZIP`: one `/icons/icons.zip` request.
+- `BrowserFlow`: the actual six PNG preview requests, serially, followed by one
+  ZIP request, all using the same source URL.
+
+Requests run through the actual public observability middleware and icon/proxy
+handlers with `httptest.ResponseRecorder`. The default `info` log level and
+production HTTP/pipeline observers are enabled, with logs directed to
+`io.Discard`; successful requests do not emit access logs at that level.
+Constructing loggers, registries and handlers is outside the timed region.
+The reported work includes HTTP request/response allocation, metric observation
+and lightweight result validation: every response must have status 200 and the
+expected nonempty output type; PNG headers must have the requested dimensions,
+and ZIPs must have the eight fixed, unique, nonempty members. Existing functional
+tests separately decode complete image streams and ZIP contents.
+
+These are handler benchmarks rather than end-to-end network or browser-rendering
+measurements. They exclude listener/socket overhead and management metric
+scraping. They do include the pipeline observer installed by `PublicHandler`.
+
+Both modes initialize the proxy and execute the same workload twice before
+timing: the first pass exercises cache misses and the second exercises hits.
+This removes lazy transport/admission and both metric-series initializations
+from the comparison. Warmup is excluded from elapsed time, allocations and
+custom counters.
+
+- `Cold`: replace only the LRU with an empty one before **each operation**. A
+  browser-flow operation starts empty, then retains its source entry across the
+  remaining six requests.
+- `Warm`: retain the cache populated by the identical warmup operation.
+
+LRU replacement, counter resets and fetch-count assertions run with the
+benchmark timer stopped. Timing and allocation metrics include only the handler
+work and its result validation. The benchmarks are sequential, not a concurrency
+or admission-capacity test.
+
+## Reading the results
+
+Go reports `ns/op`, `B/op` and `allocs/op`. Custom metrics are:
+
+- `upstream_fetches/op`: calls to the fake origin transport, excluding warmup.
+  Every cold case must fetch exactly once; every warm case must fetch zero times.
+- `cache_get_hits/op`: successful calls to the underlying cache's `Get` method.
+  This counts stored entries found, rather than the HTTP cache's freshness
+  decision. It is distinct from the management metrics' `hit` or `revalidated`
+  outcomes described in [metrics.md](metrics.md).
+- `fetch_ns/op`, `decode_ns/op`, `transform_ns/op`, `encode_ns/op`,
+  `pack_ns/op`, and `write_ns/op`: differences in the actual production
+  `stage_duration_seconds_sum` histograms, converted to nanoseconds and divided
+  by benchmark operations. Snapshots are gathered after warmup and after the
+  measured iterations with timing stopped, across all result labels in the
+  fixture's private registry. An unexecuted stage reports zero. These operation
+  sums are not an additive breakdown of overall `ns/op`: bookkeeping and result
+  validation are omitted, and a stage can execute multiple times per request.
+
+The single-request cold cases expect zero successful cache gets, and their warm
+cases expect one. A cold `BrowserFlow` expects six successful gets and one
+origin fetch; a warm flow expects seven gets and zero fetches. A regular test
+(`TestPipelineBenchmarkCacheBehavior`) checks these counts for repeated
+operations, and every benchmark iteration checks them again.
+The regular test also checks that warm source reuse removes the fetch-stage
+observation while icon decoding and encoding still execute. Warm legacy
+transformed-cache hits do not repeat encoding.
+
+The source cache reduces upstream fetching. Icon outputs are **not** cached:
+each PNG or ZIP request still validates and decodes the source and repeats the
+required resize/encode work; ZIP requests also regenerate ICO, manifest and ZIP
+bytes. A warm ZIP therefore need not be much faster or use much less memory.
+The legacy imageproxy endpoint can also cache its transformed response, so its
+warm behavior should not be generalized to the icon endpoints.
+
+This fixed fixture reveals reproducible pipeline and cache behavior. It does
+not predict production latency or maximum throughput: source size, entropy,
+format, animation, cache directives, network latency, CPU and concurrent load
+all change the result. Record the code revision and complete command alongside
+measurements, and compare repeated runs rather than using one sample as a
+performance guarantee.
+
+## Recorded baseline: 2026-10-25
+
+Measured source revision:
+[`fc7bf69`](https://github.com/soulteary/favicon-generator/commit/fc7bf69aa7f317a1d028a4c69e37f17b6efceb1c).
+Environment: Go 1.27.3, macOS 26.5.1, darwin/arm64, Apple M5,
+`GOMAXPROCS=2`. The observer is enabled and the race detector is disabled.
+The documentation commit containing these results does not change measured code.
+
+```sh
+GOMAXPROCS=2 BENCHTIME=1s BENCHCOUNT=3 ./scripts/benchmark.sh
+```
+
+[Raw output from all 24 samples](benchmarks/2026-10-25-go1.27.3-darwin-arm64.txt).
+The following values are the independent medians of three samples for each case:
+
+- `LegacyPNG`: cold **1.578 ms/op**, 2,587,346 B/op, 405 allocs/op;
+  warm **0.0124 ms/op**, 34,923 B/op, 137 allocs/op.
+- `IconPNG`: cold **1.755 ms/op**, 3,310,763 B/op, 352 allocs/op;
+  warm **1.853 ms/op**, 3,201,585 B/op, 305 allocs/op.
+- `ZIP`: cold **28.483 ms/op**, 31,583,545 B/op, 1,178 allocs/op;
+  warm **27.869 ms/op**, 31,464,545 B/op, 1,131 allocs/op.
+- `BrowserFlow`: cold **56.225 ms/op**, 60,996,541 B/op, 3,089 allocs/op;
+  warm **55.856 ms/op**, 60,877,458 B/op, 3,040 allocs/op.
+
+Every cold case made exactly one upstream call, and every warm case made zero.
+Browser-flow cache gets were six cold and seven warm. All per-iteration output
+and count assertions passed. `B/op` is cumulative allocated bytes, not peak or
+retained memory.
+
+In the warm browser flow, median stage totals per operation were 13.673 ms of
+decode/check work, 21.770 ms of transformation, 20.243 ms of encoding, 0.0449 ms
+of packing, 0.0381 ms of writing to the recorder, and zero fetching. Source
+caching therefore removes origin retrieval but leaves the repeated icon
+generation work visible. The much cheaper warm legacy case reuses transformed
+output and still runs metadata/resource checks.
+
+The fake origin has no network latency, so these results isolate handler work.
+The warm icon PNG sample was slightly slower than cold, and one warm browser
+sample reached 61.669 ms: the small differences between cold and warm icon
+operations do not establish a speedup. The robust distinction here is one
+versus zero origin calls, and continued transform/encode work. Real network
+latency can make source caching substantially more valuable; measure production
+traffic with the stage and cache metrics before selecting an output-cache policy.

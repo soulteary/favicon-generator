@@ -143,14 +143,27 @@ func (t *fetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := policy.checkURL(req.URL); err != nil {
 		return nil, err
 	}
+	finishFetch := StartStage(req.Context(), "fetch")
 	resp, err := t.Transport.RoundTrip(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		finishFetch(err)
 		return nil, err
 	}
 	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: policy.maxBytes}
 	if err := policy.checkResponse(resp); err != nil {
-		resp.Body.Close()
+		closeErr := resp.Body.Close()
+		finishFetch(errors.Join(err, closeErr))
 		return nil, err
+	}
+	if observerFromContext(req.Context()) != nil {
+		var statusErr error
+		if resp.StatusCode >= 400 {
+			statusErr = errors.New("upstream response failed")
+		}
+		resp.Body = &observedBody{ReadCloser: resp.Body, finish: func(err error) { finishFetch(errors.Join(statusErr, err)) }}
 	}
 	return resp, nil
 }

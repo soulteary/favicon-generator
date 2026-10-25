@@ -25,76 +25,32 @@ var errInvalidICOFrame = errors.New("invalid ICO frame")
 // on-disk ICO layout, rather than the similar Windows resource-group layout.
 // https://devblogs.microsoft.com/oldnewthing/20101018-00/?p=12513
 // https://devblogs.microsoft.com/oldnewthing/20101022-00/?p=12473
-func encodeICO(ctx context.Context, frames []icoFrame, maxBytes int64) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
+func encodeICO(ctx context.Context, frames []icoFrame, maxBytes int64) (_ []byte, err error) {
+	// Preflight and container assembly are measured separately from PNG
+	// validation and transcoding, so encode never includes decode time.
+	preflight := imageproxy.StartStage(ctx, "encode")
+	limit, directoryBytes, err := iconICOLayout(ctx, frames, maxBytes)
+	preflight(err)
+	if err != nil {
 		return nil, err
-	}
-	if len(frames) == 0 || len(frames) > 4 {
-		return nil, fmt.Errorf("%w: expected one to four images", errInvalidICOFrame)
-	}
-	// Every length and offset is a DWORD; also keep the final allocation
-	// representable by int on all supported architectures.
-	limit := min(maxBytes, int64(math.MaxUint32), int64(math.MaxInt))
-	directoryBytes := int64(6 + 16*len(frames))
-	if limit < directoryBytes {
-		return nil, imageproxy.ErrResponseTooLarge
-	}
-	seen := make(map[int]bool, len(frames))
-	inputBytes := directoryBytes
-	for _, frame := range frames {
-		switch frame.Size {
-		case 16, 32, 48, 256:
-		default:
-			return nil, fmt.Errorf("%w: unsupported image size", errInvalidICOFrame)
-		}
-		if seen[frame.Size] || len(frame.PNG) == 0 {
-			return nil, fmt.Errorf("%w: duplicate size or empty PNG", errInvalidICOFrame)
-		}
-		seen[frame.Size] = true
-		if int64(len(frame.PNG)) > limit-inputBytes {
-			return nil, imageproxy.ErrResponseTooLarge
-		}
-		inputBytes += int64(len(frame.PNG))
 	}
 
 	images := make([][]byte, len(frames))
 	totalBytes := directoryBytes
 	for i, frame := range frames {
-		if err := ctx.Err(); err != nil {
+		decoded, err := decodeICOFrame(ctx, frame)
+		if err != nil {
 			return nil, err
 		}
-		config, err := png.DecodeConfig(icoContextReader{ctx, bytes.NewReader(frame.PNG)})
-		if err != nil || config.Width != frame.Size || config.Height != frame.Size {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: PNG dimensions or header", errInvalidICOFrame)
-		}
-		// DecodeConfig alone cannot verify the pixel stream, checksums or IEND.
-		reader := bytes.NewReader(frame.PNG)
-		decoded, err := png.Decode(icoContextReader{ctx, reader})
-		if err != nil || reader.Len() != 0 {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: incomplete or malformed PNG", errInvalidICOFrame)
-		}
-		data := frame.PNG
-		// Microsoft requires PNG icon images to have 8-bit RGBA channels.
-		// Go's PNG encoder otherwise omits alpha for fully opaque images.
-		if frame.PNG[24] != 8 || frame.PNG[25] != 6 {
-			writer := &icoPNGWriter{ctx: ctx, limit: limit - totalBytes}
-			if err := png.Encode(writer, icoRGBAImage{decoded}); err != nil {
-				return nil, err
-			}
-			data = writer.buf.Bytes()
-		}
-		if int64(len(data)) > limit-totalBytes {
-			return nil, imageproxy.ErrResponseTooLarge
+		data, err := encodeICOFrame(ctx, frame.PNG, decoded, limit-totalBytes)
+		if err != nil {
+			return nil, err
 		}
 		images[i] = data
 		totalBytes += int64(len(data))
 	}
+	finish := imageproxy.StartStage(ctx, "encode")
+	defer func() { finish(err) }()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -121,6 +77,86 @@ func encodeICO(ctx context.Context, frames []icoFrame, maxBytes int64) ([]byte, 
 		return nil, err
 	}
 	return result, nil
+}
+
+func iconICOLayout(ctx context.Context, frames []icoFrame, maxBytes int64) (limit, directoryBytes int64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+	if len(frames) == 0 || len(frames) > 4 {
+		return 0, 0, fmt.Errorf("%w: expected one to four images", errInvalidICOFrame)
+	}
+	// Every length and offset is a DWORD; also keep the final allocation
+	// representable by int on all supported architectures.
+	limit = min(maxBytes, int64(math.MaxUint32), int64(math.MaxInt))
+	directoryBytes = int64(6 + 16*len(frames))
+	if limit < directoryBytes {
+		return 0, 0, imageproxy.ErrResponseTooLarge
+	}
+	seen := make(map[int]bool, len(frames))
+	inputBytes := directoryBytes
+	for _, frame := range frames {
+		switch frame.Size {
+		case 16, 32, 48, 256:
+		default:
+			return 0, 0, fmt.Errorf("%w: unsupported image size", errInvalidICOFrame)
+		}
+		if seen[frame.Size] || len(frame.PNG) == 0 {
+			return 0, 0, fmt.Errorf("%w: duplicate size or empty PNG", errInvalidICOFrame)
+		}
+		seen[frame.Size] = true
+		if int64(len(frame.PNG)) > limit-inputBytes {
+			return 0, 0, imageproxy.ErrResponseTooLarge
+		}
+		inputBytes += int64(len(frame.PNG))
+	}
+	return limit, directoryBytes, nil
+}
+
+func decodeICOFrame(ctx context.Context, frame icoFrame) (_ image.Image, err error) {
+	finish := imageproxy.StartStage(ctx, "decode")
+	defer func() { finish(err) }()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	config, err := png.DecodeConfig(icoContextReader{ctx, bytes.NewReader(frame.PNG)})
+	if err != nil || config.Width != frame.Size || config.Height != frame.Size {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: PNG dimensions or header", errInvalidICOFrame)
+	}
+	// DecodeConfig alone cannot verify the pixel stream, checksums or IEND.
+	reader := bytes.NewReader(frame.PNG)
+	decoded, err := png.Decode(icoContextReader{ctx, reader})
+	if err != nil || reader.Len() != 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: incomplete or malformed PNG", errInvalidICOFrame)
+	}
+	return decoded, ctx.Err()
+}
+
+func encodeICOFrame(ctx context.Context, data []byte, decoded image.Image, maxBytes int64) (_ []byte, err error) {
+	finish := imageproxy.StartStage(ctx, "encode")
+	defer func() { finish(err) }()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Microsoft requires PNG icon images to have 8-bit RGBA channels.
+	// Go's PNG encoder otherwise omits alpha for fully opaque images.
+	if data[24] != 8 || data[25] != 6 {
+		writer := &icoPNGWriter{ctx: ctx, limit: maxBytes}
+		if err := png.Encode(writer, icoRGBAImage{decoded}); err != nil {
+			return nil, err
+		}
+		data = writer.buf.Bytes()
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, imageproxy.ErrResponseTooLarge
+	}
+	return data, ctx.Err()
 }
 
 type icoContextReader struct {

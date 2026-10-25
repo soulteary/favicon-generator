@@ -87,7 +87,7 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 	if err != nil {
 		return sourceFetchError(err)
 	}
-	defer resp.Body.Close()
+	defer func() { resp.Body.Close() }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 	if err := policy.checkResponse(resp); err != nil {
 		return sourceFetchError(err)
 	}
-	data, err := readResponse(ctx, resp.Body, policy.maxBytes)
+	data, err := readAndCloseResponse(ctx, resp, policy.maxBytes)
 	if err != nil {
 		return sourceFetchError(err)
 	}

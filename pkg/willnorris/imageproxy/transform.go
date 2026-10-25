@@ -72,77 +72,68 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 	if err := validateOptions(opt); err != nil {
 		return nil, err
 	}
-	if err := checkWebP(ctx, img, maxPixels); err != nil {
-		return nil, err
-	}
-	config, format, err := image.DecodeConfig(newContextReader(ctx, img))
+	format, frames, err := preflightImage(ctx, img, maxPixels, maxFrames)
 	if err != nil {
 		return nil, err
-	}
-	if err := checkPixels(config.Width, config.Height, maxPixels); err != nil {
-		return nil, err
-	}
-	frames := 1
-	if format == "gif" {
-		frames, err = checkGIF(ctx, img, maxPixels, maxFrames)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if !opt.transform() {
 		return img, ctx.Err()
 	}
+	sourceFormat := format
+	// Encode WebP and TIFF as JPEG by default.
+	if format == "tiff" || format == "webp" {
+		format = "jpeg"
+	}
+	if opt.Format != "" {
+		format = opt.Format
+	}
+	buf := new(bytes.Buffer)
+	w := contextWriter{ctx, &boundedWriter{w: buf, remaining: maxBytes}}
+	if format == "gif" {
+		fn := func(img image.Image) (image.Image, error) {
+			return transformImageWithLimits(ctx, img, opt, maxPixels/int64(frames))
+		}
+		// GIF owns its complete DecodeAll/compose/transform/EncodeAll phases;
+		// do not wrap Process in an encode timer or decode a discarded frame.
+		err = gifresize.ProcessWithStages(ctx, w, newContextReader(ctx, img), fn, func(stage string) func(error) { return StartStage(ctx, stage) })
+		if err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), ctx.Err()
+	}
 
 	// decode image
+	finishDecode := StartStage(ctx, "decode")
 	m, _, err := image.Decode(newContextReader(ctx, img))
-	if err != nil {
-		return nil, err
+	if err == nil {
+		err = checkPixels(m.Bounds().Dx(), m.Bounds().Dy(), maxPixels)
 	}
-	if err := checkPixels(m.Bounds().Dx(), m.Bounds().Dy(), maxPixels); err != nil {
+	finishDecode(err)
+	if err != nil {
 		return nil, err
 	}
 
 	// apply EXIF orientation for jpeg and tiff source images. Read at most
 	// up to maxExifSize looking for EXIF tags.
-	if format == "jpeg" || format == "tiff" {
+	if sourceFormat == "jpeg" || sourceFormat == "tiff" {
 		r := io.LimitReader(bytes.NewReader(img), maxExifSize)
 		if exifOpt := exifOrientation(r); exifOpt.transform() {
+			finishTransform := StartStage(ctx, "transform")
 			m = transformImage(m, exifOpt)
+			finishTransform(nil)
 		}
 	}
-
-	// encode webp and tiff as jpeg by default
-	if format == "tiff" || format == "webp" {
-		format = "jpeg"
-	}
-
-	if opt.Format != "" {
-		format = opt.Format
-	}
-
 	// transform and encode image
-	buf := new(bytes.Buffer)
-	w := contextWriter{ctx, &boundedWriter{w: buf, remaining: maxBytes}}
-	if format != "gif" {
-		m, err = transformImageWithLimits(ctx, m, opt, maxPixels)
-		if err != nil {
-			return nil, err
-		}
+	finishTransform := StartStage(ctx, "transform")
+	m, err = transformImageWithLimits(ctx, m, opt, maxPixels)
+	finishTransform(err)
+	if err != nil {
+		return nil, err
 	}
+	finishEncode := StartStage(ctx, "encode")
 	switch format {
 	case "bmp":
 		err = bmp.Encode(w, m)
-		if err != nil {
-			return nil, err
-		}
-	case "gif":
-		fn := func(img image.Image) (image.Image, error) {
-			return transformImageWithLimits(ctx, img, opt, maxPixels/int64(frames))
-		}
-		err = gifresize.ProcessWithContext(ctx, w, newContextReader(ctx, img), fn)
-		if err != nil {
-			return nil, err
-		}
 	case "jpeg":
 		quality := opt.Quality
 		if quality == 0 {
@@ -150,27 +141,44 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 		}
 
 		err = jpeg.Encode(w, m, &jpeg.Options{Quality: quality})
-		if err != nil {
-			return nil, err
-		}
 	case "png":
 		err = png.Encode(w, m)
-		if err != nil {
-			return nil, err
-		}
 	case "tiff":
 		err = tiff.Encode(w, m, &tiff.Options{Compression: tiff.Deflate, Predictor: true})
-		if err != nil {
-			return nil, err
-		}
 	default:
-		return nil, fmt.Errorf("unsupported format: %v", format)
+		err = fmt.Errorf("unsupported format: %v", format)
 	}
-
-	if err := ctx.Err(); err != nil {
+	if err == nil {
+		err = ctx.Err()
+	}
+	finishEncode(err)
+	if err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// Metadata inspection is a real decode operation even when cached output needs
+// no transformation. Pixel/frame rejections are attributed to this preflight.
+func preflightImage(ctx context.Context, img []byte, maxPixels int64, maxFrames int) (format string, frames int, err error) {
+	finish := StartStage(ctx, "decode")
+	defer func() { finish(err) }()
+	if err = checkWebP(ctx, img, maxPixels); err != nil {
+		return
+	}
+	var config image.Config
+	config, format, err = image.DecodeConfig(newContextReader(ctx, img))
+	if err != nil {
+		return
+	}
+	if err = checkPixels(config.Width, config.Height, maxPixels); err != nil {
+		return
+	}
+	frames = 1
+	if format == "gif" {
+		frames, err = checkGIF(ctx, img, maxPixels, maxFrames)
+	}
+	return
 }
 
 // evaluateFloat interprets the option value f. If f is between 0 and 1, it is

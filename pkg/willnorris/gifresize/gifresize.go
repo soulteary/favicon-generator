@@ -50,16 +50,44 @@ func Process(w io.Writer, r io.Reader, transform TransformFunc) error {
 // Callers handling untrusted GIFs must bound the input's frame count and decoded
 // pixel count before calling this function, since gif.DecodeAll retains frames.
 func ProcessWithContext(ctx context.Context, w io.Writer, r io.Reader, transform func(image.Image) (image.Image, error)) error {
+	return ProcessWithStages(ctx, w, r, transform, nil)
+}
+
+func noStage(error) {}
+
+// ProcessWithStages exposes the actual decode, frame transformation, and encode
+// operations without importing a metrics implementation. A nil start is a no-op.
+func ProcessWithStages(ctx context.Context, w io.Writer, r io.Reader, transform func(image.Image) (image.Image, error), start func(string) func(error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if start == nil {
+		start = func(string) func(error) { return noStage }
+	}
 
 	// Decode the original gif.
+	finishDecode := start("decode")
 	im, err := gif.DecodeAll(r)
+	finishDecode(err)
 	if err != nil {
 		return err
 	}
+	finishTransform := start("transform")
+	err = transformFrames(ctx, im, transform)
+	finishTransform(err)
+	if err != nil {
+		return err
+	}
+	finishEncode := start("encode")
+	err = gif.EncodeAll(w, im)
+	if err == nil {
+		err = ctx.Err()
+	}
+	finishEncode(err)
+	return err
+}
 
+func transformFrames(ctx context.Context, im *gif.GIF, transform func(image.Image) (image.Image, error)) error {
 	// Create a new RGBA image to hold the incremental frames.
 	b := image.Rect(0, 0, im.Config.Width, im.Config.Height)
 	img := image.NewRGBA(b)
@@ -93,10 +121,7 @@ func ProcessWithContext(ctx context.Context, w io.Writer, r io.Reader, transform
 	im.Config.Width = im.Image[0].Bounds().Max.X
 	im.Config.Height = im.Image[0].Bounds().Max.Y
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return gif.EncodeAll(w, im)
+	return ctx.Err()
 }
 
 func imageToPaletted(img image.Image, p color.Palette) *image.Paletted {
