@@ -394,3 +394,78 @@ func TestIconServiceSharesAdmissionAndKeepsHealthAvailable(t *testing.T) {
 		t.Fatal("icons metrics are missing or expose source URLs")
 	}
 }
+
+type blockedIconResponse struct {
+	*httptest.ResponseRecorder
+	started  chan struct{}
+	release  chan struct{}
+	deadline time.Time
+}
+
+func (w *blockedIconResponse) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func (w *blockedIconResponse) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestIconSlowDownloadRetainsAdmissionSlot(t *testing.T) {
+	h, _ := newTestIconHandler(iconSourcePNG(t))
+	h.proxy.MaxConcurrentRequests = 1
+	h.proxy.Timeout = 5 * time.Second
+	q := url.Values{"url": {"https://origin.test/logo"}}
+	w := &blockedIconResponse{ResponseRecorder: httptest.NewRecorder(), started: make(chan struct{}), release: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(w.release) })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/icons/favicon-32x32.png?"+q.Encode(), nil).WithContext(ctx))
+	}()
+	lifecycleWait(t, w.started)
+	if remaining := time.Until(w.deadline); remaining <= 0 || remaining > h.proxy.Timeout {
+		t.Fatalf("response does not use remaining request deadline: %v", remaining)
+	}
+	if second := iconRequest(h, "GET", "favicon-32x32.png", q); second.Code != 503 || second.Header().Get("Retry-After") != "1" {
+		t.Fatalf("blocked icon download released admission early: %d", second.Code)
+	}
+	proxy := httptest.NewRecorder()
+	h.ServeHTTP(proxy, httptest.NewRequest("GET", "/32,png/https://origin.test/logo", nil))
+	if proxy.Code != 503 {
+		t.Fatalf("blocked download does not share proxy admission: %d", proxy.Code)
+	}
+	// A late cancellation after committing headers must never append an error
+	// message or replace the Content-Length of the generated artifact.
+	cancel()
+	releaseOnce.Do(func() { close(w.release) })
+	lifecycleWait(t, done)
+	checkGeneratedPNG(t, w.Body.Bytes(), 32)
+	if w.Code != 200 || w.Header().Get("Content-Length") != strconv.Itoa(w.Body.Len()) {
+		t.Fatal("late error corrupted committed response")
+	}
+	if next := iconRequest(h, "GET", "favicon-32x32.png", q); next.Code != 200 {
+		t.Fatalf("finished download did not release admission: %d", next.Code)
+	}
+}
+
+type failingIconResponse struct{ *httptest.ResponseRecorder }
+
+func (w failingIconResponse) Write(p []byte) (int, error) {
+	n, _ := w.ResponseRecorder.Write(p[:min(8, len(p))])
+	return n, io.ErrClosedPipe
+}
+
+func TestIconWriteFailureDoesNotAppendError(t *testing.T) {
+	h, _ := newTestIconHandler(iconSourcePNG(t))
+	w := failingIconResponse{httptest.NewRecorder()}
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/icons/favicon-32x32.png?"+url.Values{"url": {"https://origin.test/logo"}}.Encode(), nil))
+	if w.Code != 200 || w.Body.Len() != 8 || w.Header().Get("Content-Type") != "image/png" {
+		t.Fatal("write failure appended an HTTP error to an image")
+	}
+}

@@ -59,27 +59,45 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if q.Get("s") != "" {
 		links.Set("s", q.Get("s"))
 	}
-	var output []byte
+	committed := false
 	err = h.proxy.WithSource(r.Context(), source, q.Get("s"), func(ctx context.Context, data []byte, limits imageproxy.SourceLimits) error {
-		var err error
-		output, err = generateIcon(ctx, data, limits, filename, q.Get("name"), q.Get("shortName"), links)
+		output, err := generateIcon(ctx, data, limits, filename, q.Get("name"), q.Get("shortName"), links)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Keep the shared admission slot until the download finishes. A slow
+		// reader must not accumulate completed buffers outside the image limit.
+		// The standard HTTP writer supports this deadline through our wrappers;
+		// custom writers without that capability still retain their slot.
+		if deadline, ok := ctx.Deadline(); ok {
+			if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return err
+			}
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Length", strconv.Itoa(len(output)))
+		if filename == "icons.zip" {
+			w.Header().Set("Content-Disposition", `attachment; filename="icons.zip"`)
+		}
+		committed = true
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, err = w.Write(output)
+		}
 		return err
 	})
-	if err != nil {
+	// A cancellation or write failure after headers cannot become an HTTP
+	// error body: appending text would corrupt a partial PNG/ICO/ZIP download.
+	if err != nil && !committed {
 		status, message := iconError(err)
 		if status == http.StatusServiceUnavailable {
 			w.Header().Set("Retry-After", "1")
 		}
 		http.Error(w, message, status)
 		return
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(output)))
-	if filename == "icons.zip" {
-		w.Header().Set("Content-Disposition", `attachment; filename="icons.zip"`)
-	}
-	if r.Method == http.MethodGet {
-		_, _ = w.Write(output)
 	}
 }
 
