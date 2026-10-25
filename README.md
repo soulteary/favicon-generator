@@ -185,6 +185,11 @@ method categories and response status codes; source URLs, query values and
 signatures are never label values. Scraping `/metrics` does not record another
 HTTP observation.
 
+Pipeline timing and cache counters use the `favicon_generator_pipeline_`
+prefix. Fixed pipeline, stage, result and cache-layer labels describe image and
+icon work without recording source URLs or signatures. See
+[pipeline metrics](docs/metrics.md) for stage boundaries and cache outcomes.
+
 Logs are structured JSON written to standard error. `-logLevel info` is the
 default; successful access events require `debug` or `trace`, while HTTP errors
 are logged at `warn`. `-verbose` promotes `info` to `debug`; other selected log
@@ -286,6 +291,20 @@ Frontend interaction tests use Node.js 24 or later and no third-party packages:
 ```sh
 node --test web/app.test.mjs
 ```
+
+Run deterministic cold/warm handler benchmarks with cached Go dependencies:
+
+```sh
+./scripts/benchmark.sh
+```
+
+They cover legacy PNG, one icon PNG, ZIP, and the browser's six serial previews
+followed by ZIP. Results include time, allocations, upstream fetches and cache
+Get hits per operation, plus times from the six production stage histograms.
+Warm source caching avoids refetching, while icon
+requests still repeat decoding and encoding because icon outputs are not
+cached. See [benchmark methodology and commands](docs/benchmarks.md). The script
+runs offline and CI runs a one-iteration smoke check without timing thresholds.
 
 GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3
 and stable Go, plus a separate Node.js 24 frontend test job. The stable Go job

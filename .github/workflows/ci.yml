@@ -47,6 +47,12 @@ jobs:
         run: ./scripts/test-go-version.sh
       - name: Test, vet and build every module
         run: ./scripts/test.sh
+      - name: Smoke test cold and warm pipeline benchmarks
+        if: matrix.go-version == 'stable'
+        env:
+          BENCHTIME: 1x
+          BENCHCOUNT: '1'
+        run: ./scripts/benchmark.sh
       - name: Install pinned vulnerability scanner
         if: matrix.go-version == 'stable'
         run: GOBIN="$RUNNER_TEMP/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0

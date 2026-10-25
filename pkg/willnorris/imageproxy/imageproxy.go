@@ -105,14 +105,14 @@ func NewProxy(transport http.RoundTripper, cache Cache) *Proxy {
 	}
 	client := new(http.Client)
 	client.Transport = &requestPolicyTransport{
-		Transport: &httpcache.Transport{
+		Transport: &observedCacheTransport{Transport: &httpcache.Transport{
 			Transport: &TransformingTransport{
 				Transport:     &fetchTransport{Transport: transport},
 				CachingClient: client,
 			},
 			Cache:               cache,
 			MarkCachedResponses: true,
-		},
+		}},
 	}
 	proxy.Client = client
 	return proxy
@@ -207,14 +207,16 @@ func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 		p.writeError(w, err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	if should304(r, resp) {
 		copyHeader(w.Header(), resp.Header, "Cache-Control", "Last-Modified", "Expires", "Etag")
+		finishWrite := StartStage(r.Context(), "write")
 		w.WriteHeader(http.StatusNotModified)
+		finishWrite(nil)
 		return
 	}
 	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: policy.maxBytes}
@@ -222,7 +224,7 @@ func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 		p.writeError(w, err)
 		return
 	}
-	data, err := readResponse(r.Context(), resp.Body, policy.maxBytes)
+	data, err := readAndCloseResponse(r.Context(), resp, policy.maxBytes)
 	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && len(data) > 0 {
 		// Cached output must obey the current pixel/frame budget, too.
 		_, err = transformWithLimits(r.Context(), data, Options{}, policy.maxPixels, policy.maxFrames, policy.maxBytes)
@@ -241,9 +243,16 @@ func (p *Proxy) serveImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	finishWrite := StartStage(r.Context(), "write")
 	w.WriteHeader(resp.StatusCode)
 	if r.Method != http.MethodHead {
-		_, _ = w.Write(data)
+		n, err := w.Write(data)
+		if err == nil && n != len(data) {
+			err = io.ErrShortWrite
+		}
+		finishWrite(err)
+	} else {
+		finishWrite(nil)
 	}
 }
 
@@ -456,7 +465,7 @@ func (t *TransformingTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { resp.Body.Close() }()
 	if should304(req, resp) {
 		return &http.Response{StatusCode: http.StatusNotModified, Header: resp.Header.Clone(), Body: http.NoBody, Request: req}, nil
 	}
@@ -464,7 +473,7 @@ func (t *TransformingTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if err := policy.checkResponse(resp); err != nil {
 		return nil, err
 	}
-	b, err := readResponse(req.Context(), resp.Body, policy.maxBytes)
+	b, err := readAndCloseResponse(req.Context(), resp, policy.maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +494,9 @@ func (t *TransformingTransport) RoundTrip(req *http.Request) (*http.Response, er
 	result.ContentLength = int64(len(img))
 	result.Header.Set("Content-Length", fmt.Sprint(len(img)))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 && len(img) > 0 {
-		_, format, err := image.DecodeConfig(bytes.NewReader(img))
+		finishDecode := StartStage(req.Context(), "decode")
+		_, format, err := image.DecodeConfig(newContextReader(req.Context(), img))
+		finishDecode(err)
 		if err != nil {
 			return nil, err
 		}

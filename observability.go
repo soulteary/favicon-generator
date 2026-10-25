@@ -18,6 +18,7 @@ import (
 	healthkit "github.com/soulteary/health-kit/v4"
 	loggerkit "github.com/soulteary/logger-kit/v3"
 	metricskit "github.com/soulteary/metrics-kit/v3"
+	"github.com/willnorris/imageproxy"
 )
 
 type observability struct {
@@ -25,11 +26,13 @@ type observability struct {
 	ProxyLogger       *log.Logger
 	ServerErrorLogger *log.Logger
 
-	ready       atomic.Bool
-	metrics     *metricskit.HTTPMetrics
-	metricsPage http.Handler
-	liveness    http.Handler
-	readiness   http.Handler
+	ready         atomic.Bool
+	metrics       *metricskit.HTTPMetrics
+	imagePipeline *pipelineObserver
+	iconsPipeline *pipelineObserver
+	metricsPage   http.Handler
+	liveness      http.Handler
+	readiness     http.Handler
 }
 
 // Construct observability before starting request or log goroutines. logger-kit
@@ -60,6 +63,7 @@ func newObservability(out io.Writer, level string) (*observability, error) {
 	metricConfig.IncludeRequestSize = true
 	metricConfig.IncludeResponseSize = true
 	o.metrics = metricskit.NewHTTPMetrics(metricConfig)
+	o.imagePipeline, o.iconsPipeline = newPipelineObservers(o.metrics.Registry)
 	o.metricsPage = metricskit.HandlerFor(o.metrics.Registry)
 
 	o.liveness = healthkit.LivenessHandler("favicon-generator")
@@ -159,6 +163,12 @@ func managementMethods(next http.Handler) http.Handler {
 
 func (o *observability) observe(route string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch route {
+		case "image":
+			r = r.WithContext(imageproxy.WithObserver(r.Context(), o.imagePipeline))
+		case "icons":
+			r = r.WithContext(imageproxy.WithObserver(r.Context(), o.iconsPipeline))
+		}
 		start := time.Now()
 		response := &observedResponseWriter{ResponseWriter: w}
 		method := metricMethod(r.Method)

@@ -17,7 +17,9 @@ var errInvalidIconBundleName = errors.New("invalid icon bundle filename")
 // encodeIconBundle owns its in-memory tree for this request. Both the staged
 // source bytes and the final ZIP must fit maxBytes; no archive is read or
 // extracted, and callers cannot select paths outside the fixed product files.
-func encodeIconBundle(ctx context.Context, files map[string][]byte, maxBytes int64) ([]byte, error) {
+func encodeIconBundle(ctx context.Context, files map[string][]byte, maxBytes int64) (_ []byte, err error) {
+	finish := imageproxy.StartStage(ctx, "pack")
+	defer func() { finish(err) }()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
