@@ -1,5 +1,8 @@
 # Pipeline and cache benchmarks
 
+The [recorded baseline](#recorded-baseline-2026-10-25) includes raw samples,
+environment details, and the measured source revision.
+
 Run the benchmarks with an installed Go 1.27.3 or later toolchain. Download the
 root module's dependencies once in a network-enabled environment, then run
 offline:
@@ -117,3 +120,47 @@ format, animation, cache directives, network latency, CPU and concurrent load
 all change the result. Record the code revision and complete command alongside
 measurements, and compare repeated runs rather than using one sample as a
 performance guarantee.
+
+## Recorded baseline: 2026-10-25
+
+Measured source revision:
+[`fc7bf69`](https://github.com/soulteary/favicon-generator/commit/fc7bf69aa7f317a1d028a4c69e37f17b6efceb1c).
+Environment: Go 1.27.3, macOS 26.5.1, darwin/arm64, Apple M5,
+`GOMAXPROCS=2`. The observer is enabled and the race detector is disabled.
+The documentation commit containing these results does not change measured code.
+
+```sh
+GOMAXPROCS=2 BENCHTIME=1s BENCHCOUNT=3 ./scripts/benchmark.sh
+```
+
+[Raw output from all 24 samples](benchmarks/2026-10-25-go1.27.3-darwin-arm64.txt).
+The following values are the independent medians of three samples for each case:
+
+- `LegacyPNG`: cold **1.578 ms/op**, 2,587,346 B/op, 405 allocs/op;
+  warm **0.0124 ms/op**, 34,923 B/op, 137 allocs/op.
+- `IconPNG`: cold **1.755 ms/op**, 3,310,763 B/op, 352 allocs/op;
+  warm **1.853 ms/op**, 3,201,585 B/op, 305 allocs/op.
+- `ZIP`: cold **28.483 ms/op**, 31,583,545 B/op, 1,178 allocs/op;
+  warm **27.869 ms/op**, 31,464,545 B/op, 1,131 allocs/op.
+- `BrowserFlow`: cold **56.225 ms/op**, 60,996,541 B/op, 3,089 allocs/op;
+  warm **55.856 ms/op**, 60,877,458 B/op, 3,040 allocs/op.
+
+Every cold case made exactly one upstream call, and every warm case made zero.
+Browser-flow cache gets were six cold and seven warm. All per-iteration output
+and count assertions passed. `B/op` is cumulative allocated bytes, not peak or
+retained memory.
+
+In the warm browser flow, median stage totals per operation were 13.673 ms of
+decode/check work, 21.770 ms of transformation, 20.243 ms of encoding, 0.0449 ms
+of packing, 0.0381 ms of writing to the recorder, and zero fetching. Source
+caching therefore removes origin retrieval but leaves the repeated icon
+generation work visible. The much cheaper warm legacy case reuses transformed
+output and still runs metadata/resource checks.
+
+The fake origin has no network latency, so these results isolate handler work.
+The warm icon PNG sample was slightly slower than cold, and one warm browser
+sample reached 61.669 ms: the small differences between cold and warm icon
+operations do not establish a speedup. The robust distinction here is one
+versus zero origin calls, and continued transform/encode work. Real network
+latency can make source caching substantially more valuable; measure production
+traffic with the stage and cache metrics before selecting an output-cache policy.
