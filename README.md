@@ -177,8 +177,21 @@ source identity, actual content, output product, applicable names and budgets.
 An entry never outlives the source's sharing horizon. Standalone manifests and
 errors are not cached. Concurrent identical misses share a synchronous fill;
 canceled leaders release waiters to retry within their own request deadlines.
-Memory resources close after server drain; no files or background fill workers
+Cache resources close after server drain; no files or background fill workers
 are created. Download responses remain `private, no-store` on cache hits.
+
+Use `-artifactCache redis -artifactRedisAddr localhost:6379` for the Redis
+backend, or `-artifactCache tiered` for memory-first lookups with Redis
+read-through. Redis uses redis-kit v1.8.0, bounded binary values and absolute
+expiry. `-artifactRedisTLS`, `-artifactRedisCAFile` and
+`-artifactRedisServerName` configure verified TLS; named ACL users use
+`-artifactRedisUsername`. Prefer `IMAGEPROXY_ARTIFACTREDISPASSWORD` over a
+command-line password. Redis network errors fail open, including when Redis is
+offline at startup; subsequent admitted requests retry after a one-second
+cooldown, without background reconnect workers. The 250 ms Redis operation
+budget (`-artifactRedisTimeout`, at most 5s) remains inside the image request's
+deadline. Configure Redis maxmemory separately; memory capacity flags apply to
+the local tier. See [Redis configuration and integration tests](docs/redis-cache.md).
 
 The private management registry exports
 `favicon_generator_artifact_cache_requests_total` with fixed `backend` and

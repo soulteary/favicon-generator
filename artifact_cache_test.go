@@ -424,7 +424,7 @@ func TestArtifactCLIResolutionAndBoundaries(t *testing.T) {
 	if err != nil || cfg.ArtifactCache != "off" || cfg.ArtifactCacheBytes != 64<<20 || cfg.ArtifactCacheTTL != 5*time.Minute {
 		t.Fatalf("defaults=%+v %v", cfg, err)
 	}
-	for _, args := range [][]string{{"-artifactCache=redis"}, {"-artifactCache="}, {"-artifactCacheBytes=0"}, {"-artifactCacheEntryBytes=-1"}, {"-artifactCacheTTL=0"}, {"-artifactCacheTTL=24h1ns"}, {"-artifactCache=memory", "-artifactCacheBytes=2048"}} {
+	for _, args := range [][]string{{"-artifactCache=unknown"}, {"-artifactCache="}, {"-artifactCacheBytes=0"}, {"-artifactCacheEntryBytes=-1"}, {"-artifactCacheTTL=0"}, {"-artifactCacheTTL=24h1ns"}, {"-artifactCache=memory", "-artifactCacheBytes=2048"}} {
 		if _, err := parseConfig(args, none); err == nil {
 			t.Fatalf("accepted %v", args)
 		}

@@ -120,16 +120,17 @@ sum by (pipeline, result) (
 ```
 
 See [the benchmark guide](benchmarks.md) for reproducible cold/warm workloads,
-including the browser's six PNG requests followed by a ZIP request. These
-measurements establish whether later output caching is justified; they do not
-add an output cache or change existing response privacy policies.
+including the browser's six PNG requests followed by a ZIP request. The recorded
+baseline predates optional finished-artifact caching; compare the same workload
+and cache configuration explicitly rather than treating source-cache hits as
+finished-artifact reuse. Response privacy policies are unchanged.
 
 ## Finished artifacts
 
 `favicon_generator_artifact_cache_requests_total{backend,result}` uses fixed
 backend labels (`off`, `memory`, `redis`, `tiered`) and outcomes (`hit`, `miss`,
-`bypass`, `error`). The currently configurable backends are `off` and `memory`.
-Each eligible application request records one decision after the source has
+`bypass`, `error`). Configurable backends are `off`, `memory`, `redis` and
+`tiered`. Each application request records one overall decision after the source has
 passed authorization and image preflight. A hit avoids rendering/encoding and
 ZIP packing, but still records the source checks and final response write.
 There are no raw URLs, cache keys, source metadata or filenames in these labels.
@@ -152,3 +153,16 @@ expiry and current source retention are checked on every read, independent of
 any sweeper; there is no cache background worker. Deletion replaces a key with a
 small, capacity-accounted tombstone instead of accumulating stale markers.
 Response bodies retain `private, no-store` even when an internal artifact is reused.
+
+The Redis backend bounds each operation, including lazy connection startup, by
+its command budget and the parent request deadline. A cache-only timeout is a
+backend failure; a parent cancellation is propagated. Redis connections recover
+on later requests with a one-second failure cooldown and no reconnect worker.
+
+In tiered mode, local hits avoid Redis. A remote miss or failure still permits
+local warming during generation; a remote hit is copied into the bounded local
+tier without changing its absolute expiry. Failed remote store operations also
+record `backend="redis",result="error"` in addition to the overall
+`backend="tiered"` decision. These layer errors can occur for lookup, write or
+delete, so summing backends does not produce an HTTP request count. The HTTP
+request metric remains the source of truth for request totals and status.

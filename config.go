@@ -22,18 +22,23 @@ import (
 // Config is the validated startup configuration. Cache allocation is deferred
 // until NewCache is called, so help and version requests never create a cache.
 type Config struct {
-	Addr, AdminAddr, LogLevel                   string
-	FollowRedirects, ScaleUp, Verbose, Version  bool
-	BaseURL                                     *url.URL
-	AllowHosts, ContentTypes                    []string
-	SignatureKey                                string
-	Timeout, ShutdownTimeout                    time.Duration
-	MaxResponseBytes, MaxPixels                 int64
-	MaxFrames, MaxConcurrent                    int
-	Cache                                       []CacheConfig
-	ArtifactCache                               string
-	ArtifactCacheBytes, ArtifactCacheEntryBytes int64
-	ArtifactCacheTTL                            time.Duration
+	Addr, AdminAddr, LogLevel                                         string
+	FollowRedirects, ScaleUp, Verbose, Version                        bool
+	BaseURL                                                           *url.URL
+	AllowHosts, ContentTypes                                          []string
+	SignatureKey                                                      string
+	Timeout, ShutdownTimeout                                          time.Duration
+	MaxResponseBytes, MaxPixels                                       int64
+	MaxFrames, MaxConcurrent                                          int
+	Cache                                                             []CacheConfig
+	ArtifactCache                                                     string
+	ArtifactCacheBytes, ArtifactCacheEntryBytes                       int64
+	ArtifactCacheTTL                                                  time.Duration
+	ArtifactRedisAddr, ArtifactRedisUsername, ArtifactRedisPassword   string
+	ArtifactRedisPrefix, ArtifactRedisCAFile, ArtifactRedisServerName string
+	ArtifactRedisDB                                                   int
+	ArtifactRedisTLS                                                  bool
+	ArtifactRedisTimeout                                              time.Duration
 }
 
 type configStrings struct {
