@@ -179,6 +179,11 @@ overflow. An omitted or zero age disables expiration; positive fractional
 seconds are rounded up to whole seconds. Unsupported backends, negative ages
 and malformed cache specifications are rejected.
 
+Numeric bounds and the normalized log-level enum use cli-kit v1.9.2 validators.
+The standard-library `flag.FlagSet` still parses only the winning CLI/ENV source;
+explicit `false` and empty values retain their meaning. Validator errors are
+translated to fixed diagnostics so rejected values never appear in startup errors.
+
 Run `go run . -h` for all options and their environment names.
 
 ## Health, metrics and logs
@@ -358,10 +363,13 @@ general-purpose detector. Only the standard-library-based root package is
 imported; Fiber and YAML adapters are not linked into this program even though
 their modules appear in i18n-kit's own dependency declarations.
 
-vfs-kit v1.4.6 provides the request-local in-memory file tree and ZIP writer.
-It has no third-party dependencies. A separate memfs-kit dependency is
-unnecessary for this packaging path; cache capacity and TTL continue to be
-managed by the existing LRU.
+memfs-kit v1.1.1 stages the eight fixed icon-package files in a separate
+in-memory filesystem for each request. Its WriteFile copies input bytes and
+open handles retain their snapshots. A project-owned read-only bridge supplies
+fixed permissions and timestamps to the vfs-kit v1.4.6 ZIP writer, preserving
+reproducible archives without disk files or hooks. Both libraries have no
+third-party dependencies. Source-byte, ZIP-output and cancellation limits stay
+in the image pipeline; cache capacity and TTL remain managed by the existing LRU.
 
 The local `replace` directives for these two forks have no replacement version
 metadata, so they are not fully covered by vulnerability version matching. A passing
