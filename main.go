@@ -1,165 +1,71 @@
 // Copyright 2013 The imageproxy authors.
 // SPDX-License-Identifier: Apache-2.0
 
-// imageproxy starts an HTTP server that proxies requests for remote images.
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
+	"io"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/die-net/lrucache"
-	"github.com/die-net/lrucache/twotier"
+	version "github.com/soulteary/version-kit/v4"
 	"github.com/willnorris/imageproxy"
-	"github.com/willnorris/imageproxy/third_party/envy"
 )
 
-const defaultMemorySize = 100
-
-var addr = flag.String("addr", "localhost:8080", "TCP address to listen on")
-var followRedirects = flag.Bool("followRedirects", true, "follow redirects")
-var baseURL = flag.String("baseURL", "", "default base URL for relative remote URLs")
-var cache tieredCache
-var scaleUp = flag.Bool("scaleUp", false, "allow images to scale beyond their original dimensions")
-var timeout = flag.Duration("timeout", imageproxy.DefaultTimeout, "time limit including remote fetch and image processing")
-var allowHosts = flag.String("allowHosts", "", "optional comma separated remote host allowlist")
-var signatureKey = flag.String("signatureKey", "", "optional HMAC key required for image requests")
-var maxResponseBytes = flag.Int64("maxResponseBytes", imageproxy.DefaultMaxResponseBytes, "maximum downloaded and returned image bytes")
-var maxPixels = flag.Int64("maxPixels", imageproxy.DefaultMaxPixels, "maximum decoded and output pixels, summed across GIF frames")
-var maxFrames = flag.Int("maxFrames", imageproxy.DefaultMaxFrames, "maximum GIF frames")
-var maxConcurrent = flag.Int("maxConcurrent", imageproxy.DefaultMaxConcurrentRequests, "maximum active image requests")
-var verbose = flag.Bool("verbose", false, "print verbose logging messages")
-var _ = flag.Bool("version", false, "Deprecated: this flag does nothing")
-var contentTypes = flag.String("contentTypes", "image/*", "comma separated list of allowed content types")
-
-func init() {
-	flag.Var(&cache, "cache", "location to cache images (see https://github.com/willnorris/imageproxy#cache)")
-}
-
 func main() {
-	envy.Parse("IMAGEPROXY")
-	flag.Parse()
-	if *timeout <= 0 || *maxResponseBytes <= 0 || *maxPixels <= 0 || *maxFrames <= 0 || *maxConcurrent <= 0 {
-		log.Fatal("timeout and resource limits must be positive")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:], os.LookupEnv, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-
-	p := imageproxy.NewProxy(nil, cache.Cache)
-
-	if *contentTypes != "" {
-		p.ContentTypes = strings.Split(*contentTypes, ",")
-	}
-	if *baseURL != "" {
-		var err error
-		p.DefaultBaseURL, err = url.Parse(*baseURL)
-		if err != nil {
-			log.Fatalf("error parsing baseURL: %v", err)
-		}
-	}
-
-	p.FollowRedirects = *followRedirects
-	p.Timeout = *timeout
-	p.ScaleUp = *scaleUp
-	p.Verbose = *verbose
-	p.AllowHosts = splitList(*allowHosts)
-	if *signatureKey != "" {
-		p.SignatureKeys = [][]byte{[]byte(*signatureKey)}
-	}
-	p.MaxResponseBytes = *maxResponseBytes
-	p.MaxPixels = *maxPixels
-	p.MaxFrames = *maxFrames
-	p.MaxConcurrentRequests = *maxConcurrent
-
-	server := &http.Server{
-		Addr:    *addr,
-		Handler: p,
-
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      *timeout + 5*time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    16 << 10,
-	}
-
-	fmt.Printf("imageproxy listening on %s\n", server.Addr)
-
-	log.Fatal(server.ListenAndServe())
 }
 
-func splitList(value string) []string {
-	var result []string
-	for _, item := range strings.Split(value, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			result = append(result, item)
-		}
+func run(ctx context.Context, args []string, lookupEnv func(string) (string, bool), stdout, stderr io.Writer) error {
+	cfg, err := parseConfig(args, lookupEnv)
+	if errors.Is(err, flag.ErrHelp) {
+		printConfigUsage(stdout)
+		return nil
 	}
-	return result
-}
-
-// tieredCache allows specifying multiple caches via flags, which will create
-// tiered caches using the twotier package.
-type tieredCache struct {
-	imageproxy.Cache
-}
-
-func (tc *tieredCache) String() string {
-	return fmt.Sprint(*tc)
-}
-
-func (tc *tieredCache) Set(value string) error {
-	for _, v := range strings.Fields(value) {
-		c, err := parseCache(v)
-		if err != nil {
-			return err
-		}
-
-		if tc.Cache == nil {
-			tc.Cache = c
-		} else {
-			tc.Cache = twotier.New(tc.Cache, c)
-		}
-	}
-	return nil
-}
-
-// parseCache parses c returns the specified Cache implementation.
-func parseCache(c string) (imageproxy.Cache, error) {
-	if c == "" {
-		return nil, nil
-	}
-
-	if c == "memory" {
-		c = fmt.Sprintf("memory:%d", defaultMemorySize)
-	}
-
-	u, err := url.Parse(c)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing cache flag: %w", err)
+		return err
 	}
-	return lruCache(u.Opaque)
-}
-
-// lruCache creates an LRU Cache with the specified options of the form
-// "maxSize:maxAge".  maxSize is specified in megabytes, maxAge is a duration.
-func lruCache(options string) (*lrucache.LruCache, error) {
-	parts := strings.SplitN(options, ":", 2)
-	size, err := strconv.ParseInt(parts[0], 10, 64)
+	if cfg.Version {
+		_, err := io.WriteString(stdout, version.Default().Full())
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	level := cfg.LogLevel
+	if cfg.Verbose && level == "info" {
+		level = "debug"
+	}
+	obs, err := newObservability(stderr, level)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	var age time.Duration
-	if len(parts) > 1 {
-		age, err = time.ParseDuration(parts[1])
-		if err != nil {
-			return nil, err
-		}
+	p := imageproxy.NewProxy(nil, cfg.NewCache())
+	p.DefaultBaseURL = cfg.BaseURL
+	p.FollowRedirects = cfg.FollowRedirects
+	p.ScaleUp = cfg.ScaleUp
+	p.Timeout = cfg.Timeout
+	p.AllowHosts = cfg.AllowHosts
+	p.ContentTypes = cfg.ContentTypes
+	p.MaxResponseBytes = cfg.MaxResponseBytes
+	p.MaxPixels = cfg.MaxPixels
+	p.MaxFrames = cfg.MaxFrames
+	p.MaxConcurrentRequests = cfg.MaxConcurrent
+	p.Verbose = cfg.Verbose
+	p.Logger = obs.ProxyLogger
+	if cfg.SignatureKey != "" {
+		p.SignatureKeys = [][]byte{[]byte(cfg.SignatureKey)}
 	}
-
-	return lrucache.New(size*1e6, int64(age.Seconds())), nil
+	defer p.Client.CloseIdleConnections()
+	return serve(ctx, cfg, obs, p)
 }
