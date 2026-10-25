@@ -14,6 +14,12 @@ type Observer interface {
 	ObserveCache(layer, result string)
 }
 
+// AdmissionObserver is an optional extension. Existing stage/cache observers
+// remain compatible. The only supported rejection reason is "busy".
+type AdmissionObserver interface {
+	ObserveAdmissionRejected(reason string)
+}
+
 type observerKey struct{}
 
 // WithObserver attaches an observer to this request and its derived contexts.
@@ -92,5 +98,14 @@ func observeCache(ctx context.Context, layer, result string) {
 	}
 	if observer := observerFromContext(ctx); observer != nil {
 		observer.ObserveCache(layer, result)
+	}
+}
+
+func observeAdmissionRejected(ctx context.Context, reason string) {
+	if reason != "busy" {
+		return
+	}
+	if observer, ok := observerFromContext(ctx).(AdmissionObserver); ok {
+		observer.ObserveAdmissionRejected(reason)
 	}
 }

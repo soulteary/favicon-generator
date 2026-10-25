@@ -151,6 +151,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p.slots <- struct{}{}:
 		defer func() { <-p.slots }()
 	default:
+		observeAdmissionRejected(r.Context(), "busy")
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "too many active image requests", http.StatusServiceUnavailable)
 		return

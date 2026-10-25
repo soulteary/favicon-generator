@@ -11,9 +11,10 @@ import (
 // administration endpoint and service lifetime. No URL, filename, cache key,
 // signature, or error text is ever used as a metric label.
 type pipelineObserver struct {
-	pipeline string
-	stages   *prometheus.HistogramVec
-	cache    *prometheus.CounterVec
+	pipeline  string
+	stages    *prometheus.HistogramVec
+	cache     *prometheus.CounterVec
+	admission *prometheus.CounterVec
 }
 
 func newPipelineObservers(registry *metricskit.Registry) (*pipelineObserver, *pipelineObserver) {
@@ -26,8 +27,11 @@ func newPipelineObservers(registry *metricskit.Registry) (*pipelineObserver, *pi
 	cache := r.Counter("cache_requests_total").
 		Help("HTTP cache decisions by source or transformed response; hit excludes revalidation, bypass, and errors.").
 		Labels("pipeline", "layer", "result").BuildVec()
-	return &pipelineObserver{pipeline: "image", stages: stages, cache: cache},
-		&pipelineObserver{pipeline: "icons", stages: stages, cache: cache}
+	admission := r.Counter("admission_rejected_total").
+		Help("Requests rejected before pipeline work because shared admission is full.").
+		Labels("pipeline", "reason").BuildVec()
+	return &pipelineObserver{pipeline: "image", stages: stages, cache: cache, admission: admission},
+		&pipelineObserver{pipeline: "icons", stages: stages, cache: cache, admission: admission}
 }
 
 func (o *pipelineObserver) ObserveStage(stage, result string, duration time.Duration) {
@@ -59,4 +63,10 @@ func (o *pipelineObserver) ObserveCache(layer, result string) {
 		return
 	}
 	o.cache.WithLabelValues(o.pipeline, layer, result).Inc()
+}
+
+func (o *pipelineObserver) ObserveAdmissionRejected(reason string) {
+	if reason == "busy" {
+		o.admission.WithLabelValues(o.pipeline, reason).Inc()
+	}
 }
