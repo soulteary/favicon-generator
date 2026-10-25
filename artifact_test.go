@@ -185,3 +185,49 @@ func FuzzDecodeArtifact(f *testing.F) {
 		}
 	})
 }
+
+func TestArtifactZIPDirectoryParsingBound(t *testing.T) {
+	entry := artifactTestEntry(t, "icons.zip")
+	// A matching body checksum and an advertised count of eight must not let
+	// archive/zip allocate 65544 File objects before the final count check.
+	header := make([]byte, 46+len("favicon.ico"))
+	copy(header, []byte{'P', 'K', 1, 2})
+	binary.LittleEndian.PutUint16(header[28:30], uint16(len("favicon.ico")))
+	copy(header[46:], "favicon.ico")
+	for _, count := range []int{9, 65536 + 8} {
+		body := make([]byte, 4, 4+count*len(header)+22)
+		copy(body, []byte{'P', 'K', 3, 4})
+		for range count {
+			body = append(body, header...)
+		}
+		tail := make([]byte, 22)
+		copy(tail, []byte{'P', 'K', 5, 6})
+		binary.LittleEndian.PutUint16(tail[8:10], 8)
+		binary.LittleEndian.PutUint16(tail[10:12], 8)
+		binary.LittleEndian.PutUint32(tail[12:16], uint32(count*len(header)))
+		binary.LittleEndian.PutUint32(tail[16:20], 4)
+		body = append(body, tail...)
+		malformed := newArtifactEntry(entry.Key, entry.Filename, body, entry.ExpiresAt)
+		var validationErr error
+		allocations := testing.AllocsPerRun(1, func() {
+			validationErr = validateArtifact(context.Background(), malformed, malformed.Key, malformed.Filename, artifactTestLimits(), time.Now())
+		})
+		if !errors.Is(validationErr, errInvalidArtifact) || allocations > 32 {
+			t.Fatalf("actual directory count %d: error=%v allocations=%g; parsing must reject before per-entry allocation", count, validationErr, allocations)
+		}
+	}
+	for _, mutate := range []func([]byte){
+		func(b []byte) { b[len(b)-22+12] ^= 1 }, // understated directory size
+		func(b []byte) { b[len(b)-22+16] ^= 1 }, // shifted base offset
+		func(b []byte) {
+			offset := binary.LittleEndian.Uint32(b[len(b)-22+16:])
+			binary.LittleEndian.PutUint16(b[offset+28:offset+30], 65535)
+		}, // variable-length header exceeds the directory
+	} {
+		body := bytes.Clone(entry.Body)
+		mutate(body)
+		if err := validateArtifactZIPDirectory(body); !errors.Is(err, errInvalidArtifact) {
+			t.Fatal("malformed directory accepted", err)
+		}
+	}
+}
