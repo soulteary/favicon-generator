@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"sort"
-	"time"
 
 	vfs "github.com/soulteary/vfs-kit"
 	"github.com/willnorris/imageproxy"
@@ -28,38 +26,7 @@ func encodeIconBundle(ctx context.Context, files map[string][]byte, maxBytes int
 	}
 	// The result is one Go byte slice, including on a 32-bit target.
 	maxBytes = min(maxBytes, int64(math.MaxInt))
-	names := make([]string, 0, 8)
-	remaining := maxBytes
-	for name, data := range files {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !validIconBundleName(name) {
-			return nil, errInvalidIconBundleName
-		}
-		// Subtract instead of summing lengths, avoiding aggregate overflow.
-		if int64(len(data)) > remaining {
-			return nil, imageproxy.ErrResponseTooLarge
-		}
-		remaining -= int64(len(data))
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	entries := make(map[string]*vfs.File, len(names))
-	for _, name := range names {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		entries[name] = &vfs.File{
-			Data: bytes.Clone(files[name]), Mode: 0644,
-			// A fixed representable ZIP date makes equal bundles reproducible.
-			ModTime: time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC),
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	fs, err := vfs.Map(entries)
+	fs, err := stageIconBundle(ctx, files, maxBytes)
 	if err != nil {
 		return nil, err
 	}
