@@ -9,6 +9,7 @@ replace github.com/willnorris/gifresize => ./pkg/willnorris/gifresize
 require (
 	github.com/die-net/lrucache v0.0.0-20240714232319-26322ba4bc23
 	github.com/prometheus/client_golang v1.24.1
+	github.com/soulteary/cli-kit v1.9.2
 	github.com/soulteary/health-kit/v4 v4.0.3
 	github.com/soulteary/logger-kit/v3 v3.0.3
 	github.com/soulteary/metrics-kit/v3 v3.0.3

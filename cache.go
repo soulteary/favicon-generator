@@ -9,6 +9,7 @@ import (
 
 	"github.com/die-net/lrucache"
 	"github.com/die-net/lrucache/twotier"
+	"github.com/soulteary/cli-kit/validator"
 	"github.com/willnorris/imageproxy"
 )
 
@@ -47,13 +48,13 @@ func parseCacheConfig(value string) (CacheConfig, error) {
 		return CacheConfig{}, errors.New("cache must use memory:<MB>[:age]")
 	}
 	megabytes, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || megabytes <= 0 || megabytes > math.MaxInt64/cacheMegabyte {
+	if err != nil || validator.ValidateInRangeInt64(megabytes, 1, math.MaxInt64/cacheMegabyte) != nil {
 		return CacheConfig{}, errors.New("cache capacity must be a positive integer number of MB without overflow")
 	}
 	var ageSeconds int64
 	if len(parts) == 3 {
 		age, err := time.ParseDuration(parts[2])
-		if err != nil || age < 0 {
+		if err != nil || validator.ValidateNonNegativeInt64(int64(age)) != nil {
 			return CacheConfig{}, errors.New("cache age must be a nonnegative duration without overflow")
 		}
 		// LRU expiry uses seconds. Round a positive subsecond duration up rather

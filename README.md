@@ -155,6 +155,11 @@ overflow. An omitted or zero age disables expiration; positive fractional
 seconds are rounded up to whole seconds. Unsupported backends, negative ages
 and malformed cache specifications are rejected.
 
+Numeric bounds and the normalized log-level enum use cli-kit v1.9.2 validators.
+The standard-library `flag.FlagSet` still parses only the winning CLI/ENV source;
+explicit `false` and empty values retain their meaning. Validator errors are
+translated to fixed diagnostics so rejected values never appear in startup errors.
+
 Run `go run . -h` for all options and their environment names.
 
 ## Health, metrics and logs
