@@ -9,6 +9,7 @@ replace github.com/willnorris/gifresize => ./pkg/willnorris/gifresize
 require (
 	github.com/die-net/lrucache v0.0.0-20240714232319-26322ba4bc23
 	github.com/prometheus/client_golang v1.25.0
+	github.com/redis/go-redis/v9 v9.23.0
 	github.com/soulteary/cli-kit v1.9.2
 	github.com/soulteary/health-kit/v4 v4.0.3
 	github.com/soulteary/httpcache-kit/v4 v4.1.1
@@ -16,6 +17,7 @@ require (
 	github.com/soulteary/logger-kit/v3 v3.0.3
 	github.com/soulteary/memfs-kit v1.1.1
 	github.com/soulteary/metrics-kit/v3 v3.0.3
+	github.com/soulteary/redis-kit v1.8.0
 	github.com/soulteary/version-kit/v4 v4.0.2
 	github.com/soulteary/vfs-kit v1.4.6
 	github.com/willnorris/imageproxy v0.0.0
@@ -39,6 +41,7 @@ require (
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/willnorris/gifresize v1.0.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
