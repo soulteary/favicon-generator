@@ -1,0 +1,43 @@
+name: Redis artifact cache
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redis-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      redis:
+        # Official Redis 8.4.7 multi-platform OCI index, verified 2026-10-25.
+        image: docker.io/library/redis@sha256:6a12a187547eb2eac4da4528f9d9787d69f3848e513480baedfd75e3b2ac393e
+        ports:
+          - '127.0.0.1:6379:6379'
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: '**/go.sum'
+      - name: Test the bounded Redis backend against real Redis
+        env:
+          GOTOOLCHAIN: local
+          GOWORK: 'off'
+          REDIS_TEST_ADDR: 127.0.0.1:6379
+          REDIS_TEST_REQUIRED: '1'
+        run: go test -mod=readonly -race -count=1 -timeout=2m -run '^TestRedisArtifact' .

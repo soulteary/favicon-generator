@@ -22,15 +22,23 @@ import (
 // Config is the validated startup configuration. Cache allocation is deferred
 // until NewCache is called, so help and version requests never create a cache.
 type Config struct {
-	Addr, AdminAddr, LogLevel                  string
-	FollowRedirects, ScaleUp, Verbose, Version bool
-	BaseURL                                    *url.URL
-	AllowHosts, ContentTypes                   []string
-	SignatureKey                               string
-	Timeout, ShutdownTimeout                   time.Duration
-	MaxResponseBytes, MaxPixels                int64
-	MaxFrames, MaxConcurrent                   int
-	Cache                                      []CacheConfig
+	Addr, AdminAddr, LogLevel                                         string
+	FollowRedirects, ScaleUp, Verbose, Version                        bool
+	BaseURL                                                           *url.URL
+	AllowHosts, ContentTypes                                          []string
+	SignatureKey                                                      string
+	Timeout, ShutdownTimeout                                          time.Duration
+	MaxResponseBytes, MaxPixels                                       int64
+	MaxFrames, MaxConcurrent                                          int
+	Cache                                                             []CacheConfig
+	ArtifactCache                                                     string
+	ArtifactCacheBytes, ArtifactCacheEntryBytes                       int64
+	ArtifactCacheTTL                                                  time.Duration
+	ArtifactRedisAddr, ArtifactRedisUsername, ArtifactRedisPassword   string
+	ArtifactRedisPrefix, ArtifactRedisCAFile, ArtifactRedisServerName string
+	ArtifactRedisDB                                                   int
+	ArtifactRedisTLS                                                  bool
+	ArtifactRedisTimeout                                              time.Duration
 }
 
 type configStrings struct {
@@ -60,6 +68,7 @@ func configFlags(output io.Writer) (*flag.FlagSet, *Config, *configStrings) {
 	fs.IntVar(&c.MaxFrames, "maxFrames", imageproxy.DefaultMaxFrames, "maximum GIF frames")
 	fs.IntVar(&c.MaxConcurrent, "maxConcurrent", imageproxy.DefaultMaxConcurrentRequests, "maximum active image requests")
 	fs.Var(cacheConfigValue{target: &c.Cache}, "cache", "memory:<MB>[:age]; repeat for multiple tiers; memory means 100 MB")
+	registerArtifactFlags(fs, c)
 	fs.VisitAll(func(f *flag.Flag) {
 		f.Usage += " [" + configEnvName(f.Name) + "]"
 	})
@@ -166,6 +175,9 @@ func validateConfig(c *Config, raw *configStrings) error {
 	}
 	if validator.ValidatePositive(c.MaxConcurrent) != nil {
 		return invalidConfig("maxConcurrent", "must be positive")
+	}
+	if err := validateArtifactConfig(c); err != nil {
+		return err
 	}
 	c.BaseURL = nil
 	if raw.baseURL != "" {

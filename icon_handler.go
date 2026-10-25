@@ -14,7 +14,10 @@ import (
 	"github.com/willnorris/imageproxy"
 )
 
-type iconHandler struct{ proxy *imageproxy.Proxy }
+type iconHandler struct {
+	proxy     *imageproxy.Proxy
+	artifacts *artifactService
+}
 
 func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if serveUI(w, r) {
@@ -65,8 +68,17 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		links.Set("s", q.Get("s"))
 	}
 	committed := false
-	err = h.proxy.WithSource(r.Context(), source, q.Get("s"), func(ctx context.Context, data []byte, limits imageproxy.SourceLimits) (writeErr error) {
-		output, err := generateIcon(ctx, data, limits, filename, q.Get("name"), q.Get("shortName"), links)
+	err = h.proxy.WithSourceMetadata(r.Context(), source, q.Get("s"), func(ctx context.Context, data []byte, limits imageproxy.SourceLimits, metadata imageproxy.SourceMetadata) (writeErr error) {
+		generate := func(ctx context.Context) ([]byte, error) {
+			return generateIcon(ctx, data, limits, filename, q.Get("name"), q.Get("shortName"), links)
+		}
+		var output []byte
+		var err error
+		if h.artifacts != nil {
+			output, err = h.artifacts.GetOrGenerate(ctx, source, metadata, filename, q.Get("name"), q.Get("shortName"), limits, generate)
+		} else {
+			output, err = generate(ctx)
+		}
 		if err != nil {
 			return err
 		}

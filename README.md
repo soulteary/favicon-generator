@@ -179,6 +179,50 @@ overflow. An omitted or zero age disables expiration; positive fractional
 seconds are rounded up to whole seconds. Unsupported backends, negative ages
 and malformed cache specifications are rejected.
 
+Finished PNG, ICO and ZIP artifacts have a separate opt-in cache:
+
+```sh
+go run . -cache memory:100:1h -artifactCache memory
+```
+
+`-artifactCache` defaults to `off`. The memory backend uses httpcache-kit/v4
+with a 64 MiB payload/header capacity (`-artifactCacheBytes`), a 20 MiB per-entry
+body limit (`-artifactCacheEntryBytes`, also capped by `-maxResponseBytes`) and a
+five-minute TTL (`-artifactCacheTTL`, at most 24 hours). Capacity must fit one
+effective entry plus its envelope and fixed headers. These flags follow the
+same CLI/environment precedence as the other options. Payload capacity is not
+a process RSS limit: bounded per-operation copies, index overhead, source
+buffers and admitted response buffers also use memory.
+
+Every lookup runs after source authorization, download and image-budget checks.
+Only explicitly public, fresh sources are eligible; private/no-store/no-cache
+responses, cookies and unsupported variants bypass this cache. Keys bind the
+source identity, actual content, output product, applicable names and budgets.
+An entry never outlives the source's sharing horizon. Standalone manifests and
+errors are not cached. Concurrent identical misses share a synchronous fill;
+canceled leaders release waiters to retry within their own request deadlines.
+Cache resources close after server drain; no files or background fill workers
+are created. Download responses remain `private, no-store` on cache hits.
+
+Use `-artifactCache redis -artifactRedisAddr localhost:6379` for the Redis
+backend, or `-artifactCache tiered` for memory-first lookups with Redis
+read-through. Redis uses redis-kit v1.8.0, bounded binary values and absolute
+expiry. `-artifactRedisTLS`, `-artifactRedisCAFile` and
+`-artifactRedisServerName` configure verified TLS; named ACL users use
+`-artifactRedisUsername`. Prefer `IMAGEPROXY_ARTIFACTREDISPASSWORD` over a
+command-line password. Redis network errors fail open, including when Redis is
+offline at startup; subsequent admitted requests retry after a one-second
+cooldown, without background reconnect workers. The 250 ms Redis operation
+budget (`-artifactRedisTimeout`, at most 5s) remains inside the image request's
+deadline. Configure Redis maxmemory separately; memory capacity flags apply to
+the local tier. See [Redis configuration and integration tests](docs/redis-cache.md).
+
+The private management registry exports
+`favicon_generator_artifact_cache_requests_total` with fixed `backend` and
+`result` (`hit`, `miss`, `bypass`, `error`) labels. Backend failures fail open to
+normal generation unless the request itself was canceled. Current image-budget
+violations are rejected, including on cache hits.
+
 Numeric bounds and the normalized log-level enum use cli-kit v1.9.2 validators.
 The standard-library `flag.FlagSet` still parses only the winning CLI/ENV source;
 explicit `false` and empty values retain their meaning. Validator errors are
@@ -330,9 +374,10 @@ Run deterministic cold/warm handler benchmarks with cached Go dependencies:
 They cover legacy PNG, one icon PNG, ZIP, and the browser's six serial previews
 followed by ZIP. Results include time, allocations, upstream fetches and cache
 Get hits per operation, plus times from the six production stage histograms.
-Warm source caching avoids refetching, while icon
-requests still repeat decoding and encoding because icon outputs are not
-cached. See [benchmark methodology and commands](docs/benchmarks.md). The script
+With the default artifact cache disabled, warm source caching avoids
+refetching while icon requests still repeat decoding and encoding.
+`BenchmarkArtifactPipeline` compares off, cold-memory and warm-memory output
+caches; warm artifacts retain source validation but skip rendering and packing. See [benchmark methodology and commands](docs/benchmarks.md). The script
 runs offline and CI runs a one-iteration smoke check without timing thresholds.
 
 GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3

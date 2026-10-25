@@ -70,5 +70,11 @@ func run(ctx context.Context, args []string, lookupEnv func(string) (string, boo
 		p.SignatureKeys = [][]byte{[]byte(cfg.SignatureKey)}
 	}
 	defer p.Client.CloseIdleConnections()
-	return serve(ctx, cfg, obs, &iconHandler{proxy: p})
+	artifacts, err := cfg.newArtifactService(obs.artifactCache.Observe)
+	if err != nil {
+		return err
+	}
+	// serve returns after all admitted handlers have drained.
+	serveErr := serve(ctx, cfg, obs, &iconHandler{proxy: p, artifacts: artifacts})
+	return errors.Join(serveErr, artifacts.Close())
 }
