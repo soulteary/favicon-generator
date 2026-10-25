@@ -70,7 +70,7 @@ func (c redisArtifactConfig) validate(maxBody int64) error {
 	for _, addr := range addrs {
 		host, port, err := net.SplitHostPort(addr)
 		number, parseErr := strconv.Atoi(port)
-		if err != nil || parseErr != nil || host == "" || strings.ContainsAny(host, " \t\r\n/@") || number < 1 || number > 65535 {
+		if err != nil || parseErr != nil || !validConfigHost(host) || !validConfigPort(port) || number < 1 || number > 65535 {
 			return errRedisArtifactConfig
 		}
 	}
