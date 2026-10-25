@@ -40,23 +40,24 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "icons.zip":
 			contentType = "application/zip"
 		default:
+			w.Header().Set(iconErrorCodeHeader, iconErrorCode(http.StatusNotFound))
 			http.NotFound(w, r)
 			return
 		}
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeIconError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	q, err := parseIconQuery(r.URL.RawQuery, filename)
 	if err != nil {
-		http.Error(w, "invalid icon parameters", http.StatusBadRequest)
+		writeIconError(w, "invalid icon parameters", http.StatusBadRequest)
 		return
 	}
 	source, err := url.Parse(q.Get("url"))
 	if err != nil {
-		http.Error(w, "invalid source URL", http.StatusBadRequest)
+		writeIconError(w, "invalid source URL", http.StatusBadRequest)
 		return
 	}
 	links := url.Values{"url": {q.Get("url")}}
@@ -108,7 +109,7 @@ func (h *iconHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == http.StatusServiceUnavailable {
 			w.Header().Set("Retry-After", "1")
 		}
-		http.Error(w, message, status)
+		writeIconError(w, message, status)
 		return
 	}
 }
