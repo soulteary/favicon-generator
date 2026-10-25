@@ -56,9 +56,11 @@ of the trusted deployment boundary.
 
 Reads validate schema, binding, digest, length and logical expiry. Request-level
 validation additionally checks the product shape and current pixel/byte budget.
-ZIP directory counts are checked before archive/zip allocates a directory. The
-fixed product directory and aggregate member bytes are bounded. Returned bodies
-own their storage rather than aliasing a mutable backend buffer.
+ZIP directory offsets, size, and exactly eight actual records are scanned
+without allocation before archive/zip allocates a directory; the advertised
+EOCD count alone is insufficient because the standard reader accepts counts
+modulo 65536. The fixed product directory and aggregate member bytes are bounded.
+Returned bodies own their storage rather than aliasing a mutable backend buffer.
 
 ## Backend lifecycle
 
