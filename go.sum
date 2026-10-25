@@ -33,8 +33,8 @@ github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2K
 github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 h1:zYyBkD/k9seD2A7fsi6Oo2LfFZAehjjQMERAvZLEDnQ=
 github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646/go.mod h1:jpp1/29i3P1S/RLdc7JQKbRpFeM1dOBd8T9ki5s+AY8=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/prometheus/client_golang v1.24.1 h1:JnJkREXzWxUdCuPFpIWZiPispT9xVV59uiuyR2bPlnU=
-github.com/prometheus/client_golang v1.24.1/go.mod h1:F+oSRECHg4sse5ucfYpYDeIv/hu68Zo0uoHKetWnzcE=
+github.com/prometheus/client_golang v1.25.0 h1:cDtW1TcFsMi1RJc8khwCKB4VhzwV04aKqbYtNOXuiK0=
+github.com/prometheus/client_golang v1.25.0/go.mod h1:j2X/4/kaQHLPnmyEU8zjmkndo1T317VpCIQEml8LTKk=
 github.com/prometheus/client_model v0.6.3 h1:O0jaTVAYNxTHYInEPFJt5I3+sN8zqBtVMPTB1qyxiEo=
 github.com/prometheus/client_model v0.6.3/go.mod h1:gpN5P9S7Rr6Yr92PiQ+Ixvhf6JZEkF1dnxsYL2aPBEM=
 github.com/prometheus/common v0.72.1 h1:ZAiQed/nk8IIcsdzb2TlJu23NEUDyDLQ9TXTN2WRK6Y=
@@ -49,6 +49,8 @@ github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd h1:CmH9+J6ZSsIjUK
 github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd/go.mod h1:hPqNNc0+uJM6H+SuU8sEs5K5IQeKccPqeSjfgcKGgPk=
 github.com/soulteary/health-kit/v4 v4.0.3 h1:hqr4VVq+dxgiDSyQJMtK4zgZyIPu8YfRyPsEGER4eOI=
 github.com/soulteary/health-kit/v4 v4.0.3/go.mod h1:H8oo+OeAarz41ZPFShmUCVJ0BvE4uK9tIiCDFmu7lSI=
+github.com/soulteary/httpcache-kit/v4 v4.1.1 h1:9LHTn58H2hxMDc2IJN5WB1Av5CfSTGSFfkNb3F78aS4=
+github.com/soulteary/httpcache-kit/v4 v4.1.1/go.mod h1:4TDJbq0cmETiFLPupDOp0AKQoa0gpvb+s7v+brdLpZI=
 github.com/soulteary/logger-kit/v3 v3.0.3 h1:DG6qmf031sKT0Lv7bpl4PY3/fElsphdj2NWW/HQYfEI=
 github.com/soulteary/logger-kit/v3 v3.0.3/go.mod h1:PQr0IXuoQ2hhVK6a3Nc9fJjxXZikSIqYTQAF8QAq+D8=
 github.com/soulteary/metrics-kit/v3 v3.0.3 h1:a/Ug4MIQ79MfwMgNQCEn7JZ8sdbToVSGukwUi2qcB24=
