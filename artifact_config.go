@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"time"
+
+	"github.com/soulteary/cli-kit/validator"
 )
 
 const (
@@ -19,16 +21,16 @@ func registerArtifactFlags(fs *flag.FlagSet, c *Config) {
 }
 
 func validateArtifactConfig(c *Config) error {
-	if c.ArtifactCache != "off" && c.ArtifactCache != "memory" {
+	if validator.ValidateEnumCaseSensitive(c.ArtifactCache, []string{"off", "memory"}) != nil {
 		return invalidConfig("artifactCache", "must be off or memory")
 	}
-	if c.ArtifactCacheBytes <= 0 {
+	if validator.ValidatePositiveInt64(c.ArtifactCacheBytes) != nil {
 		return invalidConfig("artifactCacheBytes", "must be positive")
 	}
-	if c.ArtifactCacheEntryBytes <= 0 {
+	if validator.ValidatePositiveInt64(c.ArtifactCacheEntryBytes) != nil {
 		return invalidConfig("artifactCacheEntryBytes", "must be positive")
 	}
-	if c.ArtifactCacheTTL <= 0 || c.ArtifactCacheTTL > maxArtifactTTL {
+	if validator.ValidateInRangeInt64(int64(c.ArtifactCacheTTL), 1, int64(maxArtifactTTL)) != nil {
 		return invalidConfig("artifactCacheTTL", "must be positive and at most 24h")
 	}
 	if c.ArtifactCache == "memory" && artifactWireLimit(c.artifactEntryLimit()) > c.ArtifactCacheBytes-artifactResourceOverhead {

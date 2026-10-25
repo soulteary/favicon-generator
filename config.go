@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulteary/cli-kit/validator"
 	"github.com/willnorris/imageproxy"
 )
 
@@ -145,29 +146,29 @@ func validateConfig(c *Config, raw *configStrings) error {
 		return invalidConfig("adminAddr", "must be empty or a valid host:port address")
 	}
 	level := strings.ToLower(strings.TrimSpace(c.LogLevel))
-	switch level {
-	case "trace", "debug", "info", "warn", "error", "fatal", "panic", "disabled":
-	default:
+	// Kit validator errors include the rejected value. Translate failures to
+	// our fixed diagnostics rather than returning those errors to the caller.
+	if validator.ValidateEnumCaseSensitive(level, []string{"trace", "debug", "info", "warn", "error", "fatal", "panic", "disabled"}) != nil {
 		return invalidConfig("logLevel", "unsupported log level")
 	}
 	c.LogLevel = level
 	// The HTTP server adds a five-second write allowance to this deadline.
-	if c.Timeout <= 0 || c.Timeout > time.Duration(math.MaxInt64)-5*time.Second {
+	if validator.ValidateInRangeInt64(int64(c.Timeout), 1, math.MaxInt64-int64(5*time.Second)) != nil {
 		return invalidConfig("timeout", "must be positive and leave room for the HTTP write deadline")
 	}
-	if c.ShutdownTimeout <= 0 {
+	if validator.ValidatePositiveInt64(int64(c.ShutdownTimeout)) != nil {
 		return invalidConfig("shutdownTimeout", "must be positive")
 	}
-	if c.MaxResponseBytes <= 0 || c.MaxResponseBytes > int64(math.MaxInt)-1 {
+	if validator.ValidateInRangeInt64(c.MaxResponseBytes, 1, int64(math.MaxInt)-1) != nil {
 		return invalidConfig("maxResponseBytes", "must be positive and fit in a byte buffer with overflow detection")
 	}
-	if c.MaxPixels <= 0 || c.MaxPixels > int64(math.MaxInt)/16 {
+	if validator.ValidateInRangeInt64(c.MaxPixels, 1, int64(math.MaxInt)/16) != nil {
 		return invalidConfig("maxPixels", "must be positive and fit the decoder allocation bound")
 	}
-	if c.MaxFrames <= 0 {
+	if validator.ValidatePositive(c.MaxFrames) != nil {
 		return invalidConfig("maxFrames", "must be positive")
 	}
-	if c.MaxConcurrent <= 0 {
+	if validator.ValidatePositive(c.MaxConcurrent) != nil {
 		return invalidConfig("maxConcurrent", "must be positive")
 	}
 	if err := validateArtifactConfig(c); err != nil {

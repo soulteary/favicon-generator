@@ -186,6 +186,11 @@ The private management registry exports
 normal generation unless the request itself was canceled. Current image-budget
 violations are rejected, including on cache hits.
 
+Numeric bounds and the normalized log-level enum use cli-kit v1.9.2 validators.
+The standard-library `flag.FlagSet` still parses only the winning CLI/ENV source;
+explicit `false` and empty values retain their meaning. Validator errors are
+translated to fixed diagnostics so rejected values never appear in startup errors.
+
 Run `go run . -h` for all options and their environment names.
 
 ## Health, metrics and logs
@@ -332,9 +337,10 @@ Run deterministic cold/warm handler benchmarks with cached Go dependencies:
 They cover legacy PNG, one icon PNG, ZIP, and the browser's six serial previews
 followed by ZIP. Results include time, allocations, upstream fetches and cache
 Get hits per operation, plus times from the six production stage histograms.
-Warm source caching avoids refetching, while icon
-requests still repeat decoding and encoding because icon outputs are not
-cached. See [benchmark methodology and commands](docs/benchmarks.md). The script
+With the default artifact cache disabled, warm source caching avoids
+refetching while icon requests still repeat decoding and encoding.
+`BenchmarkArtifactPipeline` compares off, cold-memory and warm-memory output
+caches; warm artifacts retain source validation but skip rendering and packing. See [benchmark methodology and commands](docs/benchmarks.md). The script
 runs offline and CI runs a one-iteration smoke check without timing thresholds.
 
 GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3
@@ -356,10 +362,13 @@ logger-kit/v3 for structured logs and metrics-kit/v3 for its private Prometheus
 registry. These service integrations leave the image proxy's security and
 resource-limit chain in place.
 
-vfs-kit v1.4.6 provides the request-local in-memory file tree and ZIP writer.
-It has no third-party dependencies. A separate memfs-kit dependency is
-unnecessary for this packaging path; cache capacity and TTL continue to be
-managed by the existing LRU.
+memfs-kit v1.1.1 stages the eight fixed icon-package files in a separate
+in-memory filesystem for each request. Its WriteFile copies input bytes and
+open handles retain their snapshots. A project-owned read-only bridge supplies
+fixed permissions and timestamps to the vfs-kit v1.4.6 ZIP writer, preserving
+reproducible archives without disk files or hooks. Both libraries have no
+third-party dependencies. Source-byte, ZIP-output and cancellation limits stay
+in the image pipeline; cache capacity and TTL remain managed by the existing LRU.
 
 The local `replace` directives for these two forks have no replacement version
 metadata, so they are not fully covered by vulnerability version matching. A passing

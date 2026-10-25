@@ -118,6 +118,9 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 	if requested, _ := ctx.Value(sourceMetadataRequestKey{}).(bool); requested {
 		ctx = context.WithValue(ctx, sourceMetadataKey{}, newSourceMetadata(resp, data, time.Now()))
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	err = fn(ctx, data, limits)
 	if ctx.Err() != nil {
 		return ctx.Err()
