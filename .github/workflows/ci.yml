@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.25.x', stable]
+        go-version: ['1.27.3', stable]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,6 +30,8 @@ jobs:
           cache-dependency-path: |
             **/go.mod
             **/go.sum
+      - name: Check the Go version gate
+        run: ./scripts/test-go-version.sh
       - name: Test, vet and build every module
         run: ./scripts/test.sh
       - name: Install pinned vulnerability scanner

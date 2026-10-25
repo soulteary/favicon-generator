@@ -8,7 +8,7 @@ Favicon.ico &amp; App Icon Generator.
 
 ## Run
 
-Requires Go 1.25.0 or later. Use the latest patch release of a supported Go
+Requires Go 1.27.3 or later. Use the latest patch release of a supported Go
 version for production builds.
 
 ```sh
@@ -64,7 +64,7 @@ disallowed origins or content types return `403`, invalid dimensions return
 Only supported raster image formats are accepted; invalid image data fails
 instead of silently returning an untransformed image.
 
-Image decoding uses `golang.org/x/image` v0.45.0, which includes fixes for known
+Image decoding uses `golang.org/x/image` v0.47.0, which includes fixes for known
 TIFF metadata, tile and decompression allocation issues and excessive VP8L
 Huffman table allocation. Pixel limits alone do not protect against allocations
 inside an older decoder. WebP inputs also undergo strict RIFF and frame-header
@@ -84,20 +84,29 @@ checks equivalent to the default transport.
 ./scripts/test.sh
 ```
 
-The script runs race-enabled tests, static checks and builds for the root module
-and every nested module under `pkg`. Running only `go test ./...` at the root
-does not test those modules. Tests use generated images and local HTTP/TLS
-servers and do not require public network services. Optional tests against a
-real memcached server retain their existing availability checks.
+The script checks the installed Go toolchain and rejects versions below 1.27.3.
+Automatic toolchain downloads and switching are disabled for these checks.
+It runs race-enabled tests, static checks and builds for all three modules:
+the root module, `pkg/willnorris/imageproxy` and `pkg/willnorris/gifresize`.
+Running only `go test ./...` at the root excludes the two local forks' regression
+suites. Tests use generated images, fixtures and controlled HTTP transports;
+they do not require public network services.
 
-GitHub Actions runs the same script on pushes and pull requests using the latest
-Go 1.25 patch release and stable Go. The stable job also uses the pinned
+GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3
+and stable Go. The stable job also uses the pinned
 `govulncheck` v1.9.0 to check the actual main program and its reachable dependencies
 against the official Go vulnerability database. This includes `golang.org/x/image`
-and the build toolchain's standard library; unused nested modules are outside
-that scan. Building this scanner requires Go 1.26 or later.
+and the build toolchain's standard library. Test-only paths and APIs unused by
+the program are outside that scan.
 
-Local `replace` directives point at copied dependency sources without version
-metadata. These copies are not fully covered by vulnerability version matching;
-a passing scan does not establish that they have no known vulnerabilities. Their
-upstream versions and local changes still need to be reviewed separately.
+## Dependencies
+
+Only `imageproxy` and `gifresize` remain as local forks: they contain the proxy
+security controls and cancellable GIF processing maintained in this repository.
+Their regression suites run independently in CI alongside the main program.
+Other image and cache libraries use versioned upstream Go modules.
+
+The local `replace` directives for these two forks have no replacement version
+metadata, so they are not fully covered by vulnerability version matching. A passing
+scan does not establish that they have no known vulnerabilities; upstream changes
+and the local security patches still need to be reviewed separately.
