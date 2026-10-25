@@ -243,7 +243,9 @@ func validateArtifactZIPDirectory(data []byte) error {
 	}
 	cursor := uint64(binary.LittleEndian.Uint32(tail[16:20]))
 	size := uint64(binary.LittleEndian.Uint32(tail[12:16]))
-	if cursor < 4 || cursor > end || size != end-cursor {
+	// These sentinel values make archive/zip replace the EOCD fields with a
+	// ZIP64 directory. Never permit it to select an unscanned directory.
+	if cursor == 1<<32-1 || size == 1<<32-1 || cursor < 4 || cursor > end || size != end-cursor {
 		return errInvalidArtifact
 	}
 	for range 8 {
