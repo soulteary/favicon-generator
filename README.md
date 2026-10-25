@@ -15,9 +15,10 @@ version for production builds.
 go run . -cache memory:100:1h
 ```
 
-The image service listens on `localhost:8080`; a separate management listener
-uses `localhost:9090`. Request a remote image with optional transforms in the
-path, for example:
+The public listener serves the preview interface at
+<http://localhost:8080/>; a separate management listener uses `localhost:9090`.
+Existing imageproxy requests also accept optional transforms in the path, for
+example:
 
 ```text
 http://localhost:8080/32x32,png/https://example.com/logo.png
@@ -45,6 +46,37 @@ by version-kit:
 ```sh
 go build -ldflags '-X github.com/soulteary/version-kit/v4.Version=1.0.0 -X github.com/soulteary/version-kit/v4.Commit=COMMIT -X github.com/soulteary/version-kit/v4.BuildDate=BUILD_DATE' -o favicon-generator .
 ```
+
+## Browser preview
+
+Open the public root page in a browser with JavaScript enabled, paste an
+absolute HTTP(S) image URL and select **生成预览**. The page displays the six PNG
+sizes described below, fetching one preview at a time through the existing
+same-origin icon API. The browser never loads the remote source image directly.
+
+Under **高级设置**, optionally set the application name and short name used by
+the manifest. If the service requires signed sources, paste an existing
+URL-safe HMAC-SHA256 signature into **来源签名**. This field accepts the `s`
+signature described below; never enter the server's `signatureKey`.
+
+After all six previews succeed, select **下载图标包** to request `icons.zip`.
+Previewing does not generate a ZIP automatically. Editing any input, submitting
+again, selecting **取消**, or leaving the page cancels the previous work and
+releases its preview/download object URLs. Late responses cannot replace newer
+previews; changed inputs require another successful preview before downloading.
+
+Input errors and API failures appear as short Chinese messages for invalid
+parameters, blocked sources or signatures, resource limits, busy service and
+timeouts. Raw upstream error bodies are not displayed. The server continues to
+enforce origin, signature, concurrency and image-budget checks for every request.
+
+The application does not save source URLs or signatures to local storage,
+session storage or cookies, and does not add them to the page address. They
+remain in the current form and are sent as query parameters to the same-origin
+API when generating or downloading. UI and asset responses use `no-store` and
+`no-referrer`; previews use temporary blob URLs. The HTML, JavaScript and CSS are
+embedded in the Go executable, with no external scripts, fonts or image requests.
+No frontend build step or Node.js runtime is needed to run the service.
 
 ## Icon downloads
 
@@ -249,8 +281,15 @@ Running only `go test ./...` at the root excludes the two local forks' regressio
 suites. Tests use generated images, fixtures and controlled HTTP transports;
 they do not require public network services.
 
+Frontend interaction tests use Node.js 24 or later and no third-party packages:
+
+```sh
+node --test web/app.test.mjs
+```
+
 GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3
-and stable Go. The stable job also uses the pinned
+and stable Go, plus a separate Node.js 24 frontend test job. The stable Go job
+also uses the pinned
 `govulncheck` v1.9.0 to check the actual main program and its reachable dependencies
 against the official Go vulnerability database. This includes `golang.org/x/image`
 and the build toolchain's standard library. Test-only paths and APIs unused by
