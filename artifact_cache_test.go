@@ -482,12 +482,26 @@ func TestArtifactMetricsPrivateAndFixedLabels(t *testing.T) {
 
 type blockingArtifactStore struct {
 	artifactTestStore
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
+	entered   chan struct{}
+	waiterGet chan struct{}
+	release   chan struct{}
+	gets      atomic.Int32
+	putCalls  atomic.Int32
+	once      sync.Once
+}
+
+func (s *blockingArtifactStore) Get(ctx context.Context, key string) (artifactEntry, error) {
+	entry, err := s.artifactTestStore.Get(ctx, key)
+	// The leader does an initial lookup and a publication recheck. The third
+	// lookup belongs to the waiter, after source fetch and image preflight.
+	if s.gets.Add(1) == 3 {
+		close(s.waiterGet)
+	}
+	return entry, err
 }
 
 func (s *blockingArtifactStore) Put(ctx context.Context, e artifactEntry) error {
+	s.putCalls.Add(1)
 	s.once.Do(func() { close(s.entered) })
 	select {
 	case <-s.release:
@@ -499,25 +513,29 @@ func (s *blockingArtifactStore) Put(ctx context.Context, e artifactEntry) error 
 
 func TestArtifactWaiterKeepsProxySlotAndDeadline(t *testing.T) {
 	data := iconSourcePNG(t)
-	calls := make(chan struct{}, 4)
 	p := imageproxy.NewProxy(iconTransport(func(r *http.Request) (*http.Response, error) {
-		calls <- struct{}{}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}, "Cache-Control": {"public, max-age=3600"}, "Date": {time.Now().UTC().Format(http.TimeFormat)}}, Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data)), Request: r}, nil
 	}), nil)
 	p.MaxConcurrentRequests = 2
-	store := &blockingArtifactStore{entered: make(chan struct{}), release: make(chan struct{})}
+	store := &blockingArtifactStore{entered: make(chan struct{}), waiterGet: make(chan struct{}), release: make(chan struct{})}
 	service := newArtifactService(store, "memory", time.Minute, 1<<20, nil)
+	var release sync.Once
+	defer release.Do(func() { close(store.release) })
 	handler := &iconHandler{proxy: p, artifacts: service}
 	q := url.Values{"url": {"https://origin.test/logo.png"}}
 	first := make(chan *httptest.ResponseRecorder, 1)
 	go func() { first <- iconRequest(handler, "GET", "favicon-32x32.png", q) }()
 	<-store.entered
 	waiterCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	request := httptest.NewRequest("GET", "/icons/favicon-32x32.png?"+q.Encode(), nil).WithContext(waiterCtx)
 	second := make(chan *httptest.ResponseRecorder, 1)
 	go func() { w := httptest.NewRecorder(); handler.ServeHTTP(w, request); second <- w }()
-	<-calls
-	<-calls
+	select {
+	case <-store.waiterGet:
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter did not complete source preflight and reach artifact lookup")
+	}
 	if w := iconRequest(handler, "GET", "favicon-32x32.png", q); w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("waiter did not retain slot: %d", w.Code)
 	}
@@ -525,9 +543,12 @@ func TestArtifactWaiterKeepsProxySlotAndDeadline(t *testing.T) {
 	if w := <-second; w.Code != http.StatusGatewayTimeout {
 		t.Fatalf("waiter cancellation = %d", w.Code)
 	}
-	close(store.release)
+	release.Do(func() { close(store.release) })
 	if w := <-first; w.Code != 200 {
 		t.Fatalf("leader affected by waiter cancel: %d", w.Code)
+	}
+	if store.putCalls.Load() != 1 {
+		t.Fatal("fill waiter generated or published a duplicate artifact")
 	}
 	if w := iconRequest(handler, "HEAD", "favicon-32x32.png", q); w.Code != 200 || w.Body.Len() != 0 {
 		t.Fatalf("slot not released or HEAD body: %d/%d", w.Code, w.Body.Len())
