@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // SourceLimits bounds both an encoded image and its decoded representation.
@@ -113,6 +114,9 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if requested, _ := ctx.Value(sourceMetadataRequestKey{}).(bool); requested {
+		ctx = context.WithValue(ctx, sourceMetadataKey{}, newSourceMetadata(resp, data, time.Now()))
 	}
 	err = fn(ctx, data, limits)
 	if ctx.Err() != nil {
