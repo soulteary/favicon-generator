@@ -108,6 +108,7 @@ func TestNewRequest(t *testing.T) {
 		ExpectError bool    // whether an error is expected from NewRequest
 	}{
 		// invalid URLs
+		{"http://localhost", "", emptyOptions, true},
 		{"http://localhost/", "", emptyOptions, true},
 		{"http://localhost/1/", "", emptyOptions, true},
 		{"http://localhost//example.com/foo", "", emptyOptions, true},

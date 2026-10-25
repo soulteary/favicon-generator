@@ -323,7 +323,11 @@ func NewRequest(r *http.Request, baseURL *url.URL) (*Request, error) {
 	var err error
 	req := &Request{Original: r}
 
-	path := r.URL.EscapedPath()[1:] // strip leading slash
+	path := r.URL.EscapedPath()
+	if !strings.HasPrefix(path, "/") {
+		return nil, URLError{"missing image request path", r.URL}
+	}
+	path = path[1:] // strip leading slash
 	req.URL, err = parseURL(path)
 	if err != nil || !req.URL.IsAbs() {
 		// first segment should be options

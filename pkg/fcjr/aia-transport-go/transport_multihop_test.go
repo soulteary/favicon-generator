@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package aia_test
@@ -39,6 +40,8 @@ func TestTransport_multiHopSemicompleteChainEnd(t *testing.T) {
 	})
 	tlsServer := httptest.NewUnstartedServer(handler)
 	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	t.Cleanup(tlsServer.Close)
 
 	ca, _, caPEM, caPrivKey, err := genRootCA()
 	if err != nil {
@@ -80,10 +83,13 @@ func TestTransport_multiHopSemicompleteChainEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	*aiaTr.TLSClientConfig.RootCAs = *x509.NewCertPool()
 	aiaTr.TLSClientConfig.RootCAs.AppendCertsFromPEM(caPEM.Bytes())
+	t.Cleanup(aiaTr.CloseIdleConnections)
 
 	client := http.Client{
 		Transport: aiaTr,
+		Timeout:   5 * time.Second,
 	}
 
 	testCases := []struct {
@@ -109,7 +115,7 @@ func TestTransport_multiHopSemicompleteChainEnd(t *testing.T) {
 			if err != nil {
 				t.Log(err)
 			} else {
-				t.Logf(string(b))
+				t.Log(string(b))
 			}
 		}
 	}
@@ -130,6 +136,8 @@ func TestTransport_multiHopSemicompleteChainBeginning(t *testing.T) {
 	})
 	tlsServer := httptest.NewUnstartedServer(handler)
 	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	t.Cleanup(tlsServer.Close)
 
 	ca, _, caPEM, caPrivKey, err := genRootCA()
 	if err != nil {
@@ -172,10 +180,13 @@ func TestTransport_multiHopSemicompleteChainBeginning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	*aiaTr.TLSClientConfig.RootCAs = *x509.NewCertPool()
 	aiaTr.TLSClientConfig.RootCAs.AppendCertsFromPEM(caPEM.Bytes())
+	t.Cleanup(aiaTr.CloseIdleConnections)
 
 	client := http.Client{
 		Transport: aiaTr,
+		Timeout:   5 * time.Second,
 	}
 
 	testCases := []struct {
@@ -201,7 +212,7 @@ func TestTransport_multiHopSemicompleteChainBeginning(t *testing.T) {
 			if err != nil {
 				t.Log(err)
 			} else {
-				t.Logf(string(b))
+				t.Log(string(b))
 			}
 		}
 	}
@@ -223,6 +234,8 @@ func TestTransport_multiHopIncompleteChain(t *testing.T) {
 	})
 	tlsServer := httptest.NewUnstartedServer(handler)
 	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	t.Cleanup(tlsServer.Close)
 
 	ca, _, caPEM, caPrivKey, err := genRootCA()
 	if err != nil {
@@ -267,10 +280,13 @@ func TestTransport_multiHopIncompleteChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	*aiaTr.TLSClientConfig.RootCAs = *x509.NewCertPool()
 	aiaTr.TLSClientConfig.RootCAs.AppendCertsFromPEM(caPEM.Bytes())
+	t.Cleanup(aiaTr.CloseIdleConnections)
 
 	client := http.Client{
 		Transport: aiaTr,
+		Timeout:   5 * time.Second,
 	}
 
 	testCases := []struct {
@@ -296,7 +312,7 @@ func TestTransport_multiHopIncompleteChain(t *testing.T) {
 			if err != nil {
 				t.Log(err)
 			} else {
-				t.Logf(string(b))
+				t.Log(string(b))
 			}
 		}
 	}
@@ -358,7 +374,7 @@ func genLeafCertificate(parent *x509.Certificate, parentPrivKey *rsa.PrivateKey,
 		IssuingCertificateURL: issuingURLs,
 		IPAddresses:           []net.IP{ip},
 	}
-	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	certPrivKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,7 +410,7 @@ func genIntermediate(parent *x509.Certificate, parentPrivKey *rsa.PrivateKey, or
 		cert.IssuingCertificateURL = []string{issuingURL}
 	}
 
-	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	certPrivKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -425,7 +441,7 @@ func genRootCA() (ca *x509.Certificate, caCert tls.Certificate, caPEM *bytes.Buf
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
-	caPrivKey, err = rsa.GenerateKey(rand.Reader, 4096)
+	caPrivKey, err = rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, tls.Certificate{}, &bytes.Buffer{}, nil, err
 	}

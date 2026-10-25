@@ -27,7 +27,13 @@ var followRedirects = flag.Bool("followRedirects", true, "follow redirects")
 var baseURL = flag.String("baseURL", "", "default base URL for relative remote URLs")
 var cache tieredCache
 var scaleUp = flag.Bool("scaleUp", false, "allow images to scale beyond their original dimensions")
-var timeout = flag.Duration("timeout", 0, "time limit for requests served by this proxy")
+var timeout = flag.Duration("timeout", imageproxy.DefaultTimeout, "time limit including remote fetch and image processing")
+var allowHosts = flag.String("allowHosts", "", "optional comma separated remote host allowlist")
+var signatureKey = flag.String("signatureKey", "", "optional HMAC key required for image requests")
+var maxResponseBytes = flag.Int64("maxResponseBytes", imageproxy.DefaultMaxResponseBytes, "maximum downloaded and returned image bytes")
+var maxPixels = flag.Int64("maxPixels", imageproxy.DefaultMaxPixels, "maximum decoded and output pixels, summed across GIF frames")
+var maxFrames = flag.Int("maxFrames", imageproxy.DefaultMaxFrames, "maximum GIF frames")
+var maxConcurrent = flag.Int("maxConcurrent", imageproxy.DefaultMaxConcurrentRequests, "maximum active image requests")
 var verbose = flag.Bool("verbose", false, "print verbose logging messages")
 var _ = flag.Bool("version", false, "Deprecated: this flag does nothing")
 var contentTypes = flag.String("contentTypes", "image/*", "comma separated list of allowed content types")
@@ -39,6 +45,9 @@ func init() {
 func main() {
 	envy.Parse("IMAGEPROXY")
 	flag.Parse()
+	if *timeout <= 0 || *maxResponseBytes <= 0 || *maxPixels <= 0 || *maxFrames <= 0 || *maxConcurrent <= 0 {
+		log.Fatal("timeout and resource limits must be positive")
+	}
 
 	p := imageproxy.NewProxy(nil, cache.Cache)
 
@@ -57,19 +66,39 @@ func main() {
 	p.Timeout = *timeout
 	p.ScaleUp = *scaleUp
 	p.Verbose = *verbose
+	p.AllowHosts = splitList(*allowHosts)
+	if *signatureKey != "" {
+		p.SignatureKeys = [][]byte{[]byte(*signatureKey)}
+	}
+	p.MaxResponseBytes = *maxResponseBytes
+	p.MaxPixels = *maxPixels
+	p.MaxFrames = *maxFrames
+	p.MaxConcurrentRequests = *maxConcurrent
 
 	server := &http.Server{
 		Addr:    *addr,
 		Handler: p,
 
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      *timeout + 5*time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	fmt.Printf("imageproxy listening on %s\n", server.Addr)
 
 	log.Fatal(server.ListenAndServe())
+}
+
+func splitList(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 // tieredCache allows specifying multiple caches via flags, which will create
