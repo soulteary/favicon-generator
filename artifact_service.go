@@ -141,14 +141,20 @@ func (s *artifactService) GetOrGenerate(ctx context.Context, source *url.URL, me
 			return body, nil
 		}
 		expires := artifactExpiry(s.now(), metadata.FreshUntil(), s.ttl)
-		if int64(len(body)) > s.maxEntry || expires.IsZero() {
+		validationNow := s.now()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Retention can end between rendering and publication, especially for
+		// a nanosecond TTL. Return the completed product without caching it.
+		if int64(len(body)) > s.maxEntry || !expires.After(validationNow) {
 			result = "bypass"
 			return body, nil
 		}
 		entry := newArtifactEntry(key, filename, body, expires)
 		// Validate before publication too. A successful generator must never
 		// publish a product inconsistent with the current resource contract.
-		if err := validateArtifact(ctx, entry, key, filename, limits, s.now()); err != nil {
+		if err := validateArtifact(ctx, entry, key, filename, limits, validationNow); err != nil {
 			return nil, err
 		}
 		if err := s.store.Put(ctx, entry); err != nil {
