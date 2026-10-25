@@ -8,6 +8,9 @@ Favicon.ico &amp; App Icon Generator.
 
 ## Run
 
+Requires Go 1.25.0 or later. Use the latest patch release of a supported Go
+version for production builds.
+
 ```sh
 go run . -cache memory:100:1h
 ```
@@ -29,6 +32,10 @@ Private, loopback, link-local, reserved and transition addresses are blocked,
 including after redirects. DNS results are checked at connection time and the
 connection uses the checked IP directly. Environment HTTP proxies and automatic
 AIA certificate downloads are not used; HTTPS uses normal certificate validation.
+Fragments in upstream `Location` URLs are ignored during source retrieval and
+cannot override the requested transform options. One redirect budget covers
+cache hits, network responses and nested fetch clients. Request cancellation is
+checked before cache lookups and redirect handling.
 
 Use `-allowHosts example.com,*.example.org` to further restrict origins. Wildcards
 match the named domain and its subdomains. Redirect targets must also match.
@@ -57,6 +64,14 @@ disallowed origins or content types return `403`, invalid dimensions return
 Only supported raster image formats are accepted; invalid image data fails
 instead of silently returning an untransformed image.
 
+Image decoding uses `golang.org/x/image` v0.45.0, which includes fixes for known
+TIFF metadata, tile and decompression allocation issues and excessive VP8L
+Huffman table allocation. Pixel limits alone do not protect against allocations
+inside an older decoder. WebP inputs also undergo strict RIFF and frame-header
+validation before image decoding: actual VP8/VP8L dimensions must fit the pixel
+budget and agree with the VP8X canvas. Malformed, truncated or inconsistent
+headers are rejected, including when no transformation was requested.
+
 Flags can also be configured through `IMAGEPROXY_` environment variables using
 uppercase flag names, such as `IMAGEPROXY_MAXPIXELS` and `IMAGEPROXY_ALLOWHOSTS`.
 Run `go run . -h` for all options. Configure embedded `imageproxy.Proxy` instances
@@ -75,4 +90,14 @@ does not test those modules. Tests use generated images and local HTTP/TLS
 servers and do not require public network services. Optional tests against a
 real memcached server retain their existing availability checks.
 
-GitHub Actions runs the same script on pushes and pull requests using stable Go.
+GitHub Actions runs the same script on pushes and pull requests using the latest
+Go 1.25 patch release and stable Go. The stable job also uses the pinned
+`govulncheck` v1.9.0 to check the actual main program and its reachable dependencies
+against the official Go vulnerability database. This includes `golang.org/x/image`
+and the build toolchain's standard library; unused nested modules are outside
+that scan. Building this scanner requires Go 1.26 or later.
+
+Local `replace` directives point at copied dependency sources without version
+metadata. These copies are not fully covered by vulnerability version matching;
+a passing scan does not establish that they have no known vulnerabilities. Their
+upstream versions and local changes still need to be reviewed separately.

@@ -1,6 +1,7 @@
 package imageproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -27,8 +28,13 @@ var (
 )
 
 type contextReader struct {
-	ctx context.Context
-	r   io.Reader
+	ctx  context.Context
+	r    *bytes.Reader
+	data []byte
+}
+
+func newContextReader(ctx context.Context, data []byte) *contextReader {
+	return &contextReader{ctx: ctx, r: bytes.NewReader(data), data: data}
 }
 
 func (r contextReader) Read(p []byte) (int, error) {
@@ -36,6 +42,37 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.r.Read(p)
+}
+
+func (r contextReader) ReadAt(p []byte, off int64) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.ReadAt(p, off)
+}
+
+func (r contextReader) ReadByte() (byte, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.ReadByte()
+}
+
+// Peek lets image.Decode and image.DecodeConfig sniff without adding a
+// bufio.Reader, which would hide ReadAt from the TIFF decoder. The encoded
+// image is already in memory; random TIFF offsets must not buffer it again.
+func (r contextReader) Peek(n int) ([]byte, error) {
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		return nil, ErrInvalidDimensions
+	}
+	start := len(r.data) - r.r.Len()
+	if n > r.r.Len() {
+		return r.data[start:], io.EOF
+	}
+	return r.data[start : start+n], nil
 }
 
 type contextWriter struct {

@@ -72,7 +72,10 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 	if err := validateOptions(opt); err != nil {
 		return nil, err
 	}
-	config, format, err := image.DecodeConfig(contextReader{ctx, bytes.NewReader(img)})
+	if err := checkWebP(ctx, img, maxPixels); err != nil {
+		return nil, err
+	}
+	config, format, err := image.DecodeConfig(newContextReader(ctx, img))
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +94,7 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 	}
 
 	// decode image
-	m, _, err := image.Decode(contextReader{ctx, bytes.NewReader(img)})
+	m, _, err := image.Decode(newContextReader(ctx, img))
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +139,7 @@ func transformWithLimits(ctx context.Context, img []byte, opt Options, maxPixels
 		fn := func(img image.Image) (image.Image, error) {
 			return transformImageWithLimits(ctx, img, opt, maxPixels/int64(frames))
 		}
-		err = gifresize.ProcessWithContext(ctx, w, contextReader{ctx, bytes.NewReader(img)}, fn)
+		err = gifresize.ProcessWithContext(ctx, w, newContextReader(ctx, img), fn)
 		if err != nil {
 			return nil, err
 		}

@@ -104,13 +104,15 @@ func NewProxy(transport http.RoundTripper, cache Cache) *Proxy {
 		MaxConcurrentRequests: DefaultMaxConcurrentRequests,
 	}
 	client := new(http.Client)
-	client.Transport = &httpcache.Transport{
-		Transport: &TransformingTransport{
-			Transport:     &fetchTransport{Transport: transport},
-			CachingClient: client,
+	client.Transport = &requestPolicyTransport{
+		Transport: &httpcache.Transport{
+			Transport: &TransformingTransport{
+				Transport:     &fetchTransport{Transport: transport},
+				CachingClient: client,
+			},
+			Cache:               cache,
+			MarkCachedResponses: true,
 		},
-		Cache:               cache,
-		MarkCachedResponses: true,
 	}
 	proxy.Client = client
 	return proxy
@@ -432,17 +434,23 @@ type TransformingTransport struct {
 
 // RoundTrip implements the http.RoundTripper interface.
 func (t *TransformingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
 	policy := policyFromContext(req.Context())
 	if err := policy.checkURL(req.URL); err != nil {
 		return nil, err
 	}
-	if req.URL.Fragment == "" {
+	if req.URL.Fragment == "" || isRawFetch(req.Context()) {
 		return t.Transport.RoundTrip(req)
 	}
 
 	// RoundTrippers must not mutate their caller's request or URL.
-	rawReq := req.Clone(req.Context())
+	rawContext := context.WithValue(req.Context(), rawFetchKey{}, true)
+	rawContext = context.WithValue(rawContext, fetchPolicyKey{}, policy)
+	rawReq := req.Clone(rawContext)
 	rawReq.URL.Fragment = ""
+	rawReq.URL.RawFragment = ""
 	client := clientForRequest(t.CachingClient, policy)
 	resp, err := client.Do(rawReq)
 	if err != nil {
