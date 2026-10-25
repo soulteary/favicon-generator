@@ -109,11 +109,12 @@ func (p *Proxy) WithSource(ctx context.Context, source *url.URL, signature strin
 		return sourceFetchError(err)
 	}
 	limits := SourceLimits{policy.maxBytes, policy.maxPixels, policy.maxFrames}
-	if _, err := TransformWithBudget(ctx, data, Options{}, limits); err != nil {
-		return sourceFetchError(err)
-	}
+	_, err = TransformWithBudget(ctx, data, Options{}, limits)
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if err != nil {
+		return sourceFetchError(err)
 	}
 	if requested, _ := ctx.Value(sourceMetadataRequestKey{}).(bool); requested {
 		ctx = context.WithValue(ctx, sourceMetadataKey{}, newSourceMetadata(resp, data, time.Now()))
