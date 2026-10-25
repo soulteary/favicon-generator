@@ -187,6 +187,7 @@ func TestKitIntegrationWarmArtifactKeepsCurrentAuthorizationAndBudgets(t *testin
 			f := newKitIntegrationFixture(t, 2)
 			f.prime(t)
 			gets := f.store.gets.Load()
+			fetches := f.upstream.Load()
 			encoded := stageCount(t, f.obs, "icons", "encode", "success")
 			want := 413
 			ctx := context.Background()
@@ -213,6 +214,13 @@ func TestKitIntegrationWarmArtifactKeepsCurrentAuthorizationAndBudgets(t *testin
 			f.request(ctx, w)
 			if w.Code != want {
 				t.Fatalf("warm rejection=%d, want %d", w.Code, want)
+			}
+			wantFetches := int64(1)
+			if scenario == "signature" || scenario == "allowlist" || scenario == "already-canceled" {
+				wantFetches = 0
+			}
+			if f.upstream.Load()-fetches != wantFetches {
+				t.Fatal("warm rejection entered or skipped the origin contrary to its authorization/preflight boundary")
 			}
 			if scenario != "product-pixels" && f.store.gets.Load() != gets {
 				t.Fatal("rejected request entered artifact lookup")
