@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ var (
 )
 
 type fetchPolicyKey struct{}
+type rawFetchKey struct{}
 
 type fetchPolicy struct {
 	allowHosts      []string
@@ -31,6 +33,8 @@ type fetchPolicy struct {
 	maxPixels       int64
 	maxFrames       int
 	followRedirects bool
+	// Shared by all clients involved in one incoming image request.
+	redirects atomic.Int32
 }
 
 func (p *Proxy) fetchPolicy() *fetchPolicy {
@@ -75,11 +79,19 @@ func clientForRequest(original *http.Client, policy *fetchPolicy) *http.Client {
 	client := *original
 	// The per-request copy leaves the shared client's fields immutable.
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := req.Context().Err(); err != nil {
+			return err
+		}
 		if !policy.followRedirects {
 			return http.ErrUseLastResponse
 		}
-		if len(via) >= maxRedirects {
+		if policy.redirects.Add(1) >= maxRedirects {
 			return errTooManyRedirects
+		}
+		if isRawFetch(req.Context()) {
+			// Fragments from upstream redirects are not transform options.
+			req.URL.Fragment = ""
+			req.URL.RawFragment = ""
 		}
 		if err := policy.checkURL(req.URL); err != nil {
 			return err
@@ -92,12 +104,41 @@ func clientForRequest(original *http.Client, policy *fetchPolicy) *http.Client {
 	return &client
 }
 
+func isRawFetch(ctx context.Context) bool {
+	raw, _ := ctx.Value(rawFetchKey{}).(bool)
+	return raw
+}
+
+// requestPolicyTransport runs before cache lookups as well as network fetches.
+// A cancelled request must not continue following a cached redirect chain.
+type requestPolicyTransport struct {
+	Transport http.RoundTripper
+}
+
+func (t *requestPolicyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	if err := policyFromContext(req.Context()).checkURL(req.URL); err != nil {
+		return nil, err
+	}
+	if isRawFetch(req.Context()) && (req.URL.Fragment != "" || req.URL.RawFragment != "") {
+		req = req.Clone(req.Context())
+		req.URL.Fragment = ""
+		req.URL.RawFragment = ""
+	}
+	return t.Transport.RoundTrip(req)
+}
+
 // fetchTransport checks headers before the cache or decoder can buffer a body.
 type fetchTransport struct {
 	Transport http.RoundTripper
 }
 
 func (t *fetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
 	policy := policyFromContext(req.Context())
 	if err := policy.checkURL(req.URL); err != nil {
 		return nil, err
