@@ -212,7 +212,9 @@ instead of silently returning an untransformed image.
 
 Icon generation shares the image proxy's concurrency slots, source cache,
 origin restrictions, redirect budget and deadline. The slot and deadline cover
-the complete download, image conversion, ICO encoding and ZIP creation.
+the complete source fetch, image conversion, ICO encoding, ZIP creation and
+response write. Response writes use the remaining request deadline, and slow
+clients retain their image concurrency slot until the handler finishes.
 `maxPixels` also bounds the sum of unique generated square sizes (400,528 pixels
 for a complete package), rather than just its largest PNG. `maxResponseBytes`
 bounds the aggregate staged PNG/ICO/manifest bytes, the ZIP's uncompressed
