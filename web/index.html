@@ -1,62 +1,68 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{.Locale}}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <meta name="referrer" content="no-referrer">
-    <title>图标工坊 · Favicon Generator</title>
+    <title>{{t "page.title"}}</title>
     <link rel="stylesheet" href="/assets/styles.css">
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">跳到生成器</a>
+    <a class="skip-link" href="#main"><span data-i18n="nav.skip">{{t "nav.skip"}}</span></a>
     <div class="page-shell">
       <header class="site-header">
-        <a class="brand" href="/" aria-label="图标工坊首页">
+        <a class="brand" href="/" aria-label="{{t "brand.home"}}" data-i18n-aria-label="brand.home">
           <span class="brand-mark" aria-hidden="true">F</span>
-          <span>图标工坊<span class="brand-subtitle">Favicon Generator</span></span>
+          <span><span data-i18n="brand.name">{{t "brand.name"}}</span><span class="brand-subtitle">Favicon Generator</span></span>
         </a>
-        <span class="header-note">一张图片，多种尺寸</span>
+        <div class="header-tools"><span class="header-note"><span data-i18n="header.note">{{t "header.note"}}</span></span>
+        <label class="language-picker" for="language-select"><span data-i18n="language.label">{{t "language.label"}}</span>
+          <select id="language-select" aria-label="{{t "language.label"}}" data-i18n-aria-label="language.label" disabled>
+            <option value="zh-CN" {{if eq .Locale "zh-CN"}}selected{{end}}>{{t "language.zh-CN"}}</option>
+            <option value="en" {{if eq .Locale "en"}}selected{{end}}>{{t "language.en"}}</option>
+          </select>
+        </label></div>
       </header>
 
       <main id="main">
         <section class="intro" aria-labelledby="page-title">
-          <p class="eyebrow">为你的网站，准备一个好图标</p>
-          <h1 id="page-title">从一张图片，<br class="mobile-break">生成整套图标。</h1>
-          <p class="intro-copy">预览常用尺寸，下载可直接部署的图标包。<br>建议使用清晰、方形的图片，透明背景也可以。</p>
+          <p class="eyebrow"><span data-i18n="intro.eyebrow">{{t "intro.eyebrow"}}</span></p>
+          <h1 id="page-title" data-i18n="intro.title">{{t "intro.title"}}</h1>
+          <p class="intro-copy"><span data-i18n="intro.description">{{t "intro.description"}}</span><br><span data-i18n="intro.advice">{{t "intro.advice"}}</span></p>
         </section>
 
         <section class="generator-panel" aria-labelledby="source-title">
           <div class="section-heading">
             <span class="step-number" aria-hidden="true">01</span>
-            <h2 id="source-title">选择来源图片</h2>
+            <h2 id="source-title"><span data-i18n="source.title">{{t "source.title"}}</span></h2>
           </div>
           <form id="icon-form" novalidate autocomplete="off">
-            <label for="source-url">图片地址 <span class="field-note">HTTP / HTTPS</span></label>
+            <label for="source-url"><span data-i18n="form.url.label">{{t "form.url.label"}}</span> <span class="field-note">HTTP / HTTPS</span></label>
             <div class="source-row">
               <input id="source-url" type="url" inputmode="url" placeholder="https://example.com/logo.png" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="source-help" required>
-              <button id="generate-button" class="button button-primary" type="submit">生成预览 <span aria-hidden="true">↗</span></button>
+              <button id="generate-button" class="button button-primary" type="submit" disabled><span data-i18n="action.generate">{{t "action.generate"}}</span> <span aria-hidden="true">↗</span></button>
             </div>
-            <p id="source-help" class="help-text">图片只通过本站服务读取。页面不会保存地址或来源签名。</p>
+            <p id="source-help" class="help-text"><span data-i18n="form.source.help">{{t "form.source.help"}}</span></p>
 
             <details id="advanced-settings" class="advanced-settings">
-              <summary>高级设置 <span class="summary-hint">应用名称与来源签名</span></summary>
+              <summary><span data-i18n="form.advanced">{{t "form.advanced"}}</span> <span class="summary-hint"><span data-i18n="form.advanced.hint">{{t "form.advanced.hint"}}</span></span></summary>
               <div class="advanced-fields">
                 <div class="field">
-                  <label for="app-name">应用名称</label>
+                  <label for="app-name"><span data-i18n="form.name.label">{{t "form.name.label"}}</span></label>
                   <input id="app-name" type="text" value="App" autocomplete="off" aria-describedby="name-help">
-                  <p id="name-help" class="help-text">用于 manifest，最多 128 个字符。</p>
+                  <p id="name-help" class="help-text"><span data-i18n="form.name.help">{{t "form.name.help"}}</span></p>
                 </div>
                 <div class="field">
-                  <label for="app-short-name">应用短名</label>
+                  <label for="app-short-name"><span data-i18n="form.shortName.label">{{t "form.shortName.label"}}</span></label>
                   <input id="app-short-name" type="text" value="App" autocomplete="off" aria-describedby="short-name-help">
-                  <p id="short-name-help" class="help-text">用于主屏幕显示，最多 32 个字符。</p>
+                  <p id="short-name-help" class="help-text"><span data-i18n="form.shortName.help">{{t "form.shortName.help"}}</span></p>
                 </div>
                 <div class="field signature-field">
-                  <label for="source-signature">来源签名 <span class="field-note">可选</span></label>
+                  <label for="source-signature"><span data-i18n="form.signature.label">{{t "form.signature.label"}}</span> <span class="field-note"><span data-i18n="form.optional">{{t "form.optional"}}</span></span></label>
                   <input id="source-signature" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="signature-help">
-                  <p id="signature-help" class="help-text">仅填写服务要求的现有来源签名。请勿填写签名私钥。</p>
+                  <p id="signature-help" class="help-text"><span data-i18n="form.signature.help">{{t "form.signature.help"}}</span></p>
                 </div>
               </div>
             </details>
@@ -67,58 +73,59 @@
           <div class="preview-heading">
             <div class="section-heading">
               <span class="step-number" aria-hidden="true">02</span>
-              <div><h2 id="preview-title">看看每个尺寸</h2><p class="section-description">小图按原始尺寸显示，大图适度缩小。</p></div>
+              <div><h2 id="preview-title"><span data-i18n="preview.title">{{t "preview.title"}}</span></h2><p class="section-description"><span data-i18n="preview.description">{{t "preview.description"}}</span></p></div>
             </div>
-            <span class="preview-count">6 种 PNG</span>
+            <span class="preview-count"><span data-i18n="preview.count">{{t "preview.count"}}</span></span>
           </div>
 
           <div class="preview-grid">
             <article class="preview-card">
-              <div class="card-topline"><h3>浏览器图标</h3><span>16 × 16</span></div>
-              <div class="icon-stage"><img id="image-16" width="16" height="16" alt="16 × 16 浏览器图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">favicon-16x16.png</span><span id="state-16" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.32.label">{{t "icon.32.label"}}</span></h3><span>16 × 16</span></div>
+              <div class="icon-stage"><img id="image-16" width="16" height="16" alt="{{t "icon.16.alt"}}" data-i18n-alt="icon.16.alt" hidden></div>
+              <div class="card-footer"><span class="filename">favicon-16x16.png</span><span id="state-16" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
             <article class="preview-card">
-              <div class="card-topline"><h3>浏览器图标</h3><span>32 × 32</span></div>
-              <div class="icon-stage"><img id="image-32" width="32" height="32" alt="32 × 32 浏览器图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">favicon-32x32.png</span><span id="state-32" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.32.label">{{t "icon.32.label"}}</span></h3><span>32 × 32</span></div>
+              <div class="icon-stage"><img id="image-32" width="32" height="32" alt="{{t "icon.32.alt"}}" data-i18n-alt="icon.32.alt" hidden></div>
+              <div class="card-footer"><span class="filename">favicon-32x32.png</span><span id="state-32" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
             <article class="preview-card">
-              <div class="card-topline"><h3>桌面图标</h3><span>48 × 48</span></div>
-              <div class="icon-stage"><img id="image-48" width="48" height="48" alt="48 × 48 桌面图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">favicon-48x48.png</span><span id="state-48" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.48.label">{{t "icon.48.label"}}</span></h3><span>48 × 48</span></div>
+              <div class="icon-stage"><img id="image-48" width="48" height="48" alt="{{t "icon.48.alt"}}" data-i18n-alt="icon.48.alt" hidden></div>
+              <div class="card-footer"><span class="filename">favicon-48x48.png</span><span id="state-48" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
             <article class="preview-card">
-              <div class="card-topline"><h3>Apple 触控图标</h3><span>180 × 180</span></div>
-              <div class="icon-stage"><img id="image-180" width="180" height="180" alt="180 × 180 Apple 触控图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">apple-touch-icon.png</span><span id="state-180" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.180.label">{{t "icon.180.label"}}</span></h3><span>180 × 180</span></div>
+              <div class="icon-stage"><img id="image-180" width="180" height="180" alt="{{t "icon.180.alt"}}" data-i18n-alt="icon.180.alt" hidden></div>
+              <div class="card-footer"><span class="filename">apple-touch-icon.png</span><span id="state-180" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
             <article class="preview-card">
-              <div class="card-topline"><h3>Android 图标</h3><span>192 × 192</span></div>
-              <div class="icon-stage"><img id="image-192" width="192" height="192" alt="192 × 192 Android 图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">android-chrome-192x192.png</span><span id="state-192" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.192.label">{{t "icon.192.label"}}</span></h3><span>192 × 192</span></div>
+              <div class="icon-stage"><img id="image-192" width="192" height="192" alt="{{t "icon.192.alt"}}" data-i18n-alt="icon.192.alt" hidden></div>
+              <div class="card-footer"><span class="filename">android-chrome-192x192.png</span><span id="state-192" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
             <article class="preview-card">
-              <div class="card-topline"><h3>高清应用图标</h3><span>512 × 512</span></div>
-              <div class="icon-stage"><img id="image-512" width="512" height="512" alt="512 × 512 高清应用图标预览" hidden></div>
-              <div class="card-footer"><span class="filename">android-chrome-512x512.png</span><span id="state-512" class="preview-state">待生成</span></div>
+              <div class="card-topline"><h3><span data-i18n="icon.512.label">{{t "icon.512.label"}}</span></h3><span>512 × 512</span></div>
+              <div class="icon-stage"><img id="image-512" width="512" height="512" alt="{{t "icon.512.alt"}}" data-i18n-alt="icon.512.alt" hidden></div>
+              <div class="card-footer"><span class="filename">android-chrome-512x512.png</span><span id="state-512" class="preview-state"><span data-i18n="preview.pending">{{t "preview.pending"}}</span></span></div>
             </article>
           </div>
 
           <div class="result-bar">
             <div class="result-status">
-              <p id="status-message" class="status-message idle" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">粘贴图片地址，开始生成预览。</p>
-              <p class="bundle-description">图标包包含 6 种 PNG、favicon.ico 和 site.webmanifest。</p>
+              <p id="status-message" class="status-message idle" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"><span data-i18n="status.idle">{{t "status.idle"}}</span></p>
+              <p class="bundle-description"><span data-i18n="bundle.description">{{t "bundle.description"}}</span></p>
             </div>
             <div class="result-actions">
-              <button id="cancel-button" class="button button-quiet" type="button" disabled hidden>取消</button>
-              <button id="download-button" class="button button-primary" type="button" disabled>下载图标包 <span aria-hidden="true">↓</span></button>
+              <button id="cancel-button" class="button button-quiet" type="button" disabled hidden><span data-i18n="action.cancel">{{t "action.cancel"}}</span></button>
+              <button id="download-button" class="button button-primary" type="button" disabled><span data-i18n="action.download">{{t "action.download"}}</span> <span aria-hidden="true">↓</span></button>
             </div>
           </div>
         </section>
       </main>
 
-      <footer class="site-footer"><span>Favicon Generator</span><span>PNG、ICO 与 Web App Manifest，一次打包。</span></footer>
+      <footer class="site-footer"><span>Favicon Generator</span><span><span data-i18n="footer.formats">{{t "footer.formats"}}</span></span></footer>
     </div>
+    <span id="catalog-error-message" hidden>{{t "error.catalog"}}</span>
   </body>
 </html>

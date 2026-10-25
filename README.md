@@ -49,6 +49,22 @@ go build -ldflags '-X github.com/soulteary/version-kit/v4.Version=1.0.0 -X githu
 
 ## Browser preview
 
+The interface supports Simplified Chinese (`zh-CN`) and English (`en`). Chinese
+is the fallback. An explicit `/?lang=en` or `/?lang=zh-CN` takes priority over
+the supported `Accept-Language` preferences. Unsupported or unusable preferences
+fall back to Chinese; invalid or repeated explicit `lang` values return `400`.
+HTML carries `Content-Language` and `Vary: Accept-Language` while retaining
+`private, no-store`. The two fixed JSON dictionaries are embedded and served at
+`/assets/locales/zh-CN.json` and `/assets/locales/en.json` with their explicit
+content language.
+
+The language selector changes the current page in memory. It cancels active
+work, releases existing previews and requires a new preview before downloading.
+It does not change the page address or store a language cookie or browser
+preference. Source URLs and signatures retain their original bytes apart from
+the existing surrounding-whitespace trim, and are never added to language
+links or dictionary requests. No language parameter is added to icon requests.
+
 Open the public root page in a browser with JavaScript enabled, paste an
 absolute HTTP(S) image URL and select **生成预览**. The page displays the six PNG
 sizes described below, fetching one preview at a time through the existing
@@ -65,10 +81,18 @@ again, selecting **取消**, or leaving the page cancels the previous work and
 releases its preview/download object URLs. Late responses cannot replace newer
 previews; changed inputs require another successful preview before downloading.
 
-Input errors and API failures appear as short Chinese messages for invalid
+Input errors and API failures appear as short localized messages for invalid
 parameters, blocked sources or signatures, resource limits, busy service and
 timeouts. Raw upstream error bodies are not displayed. The server continues to
 enforce origin, signature, concurrency and image-budget checks for every request.
+
+These messages follow the selected page language, including labels, image alt
+text, ARIA labels and progress updates. Icon API status codes and English error
+bodies remain compatible. Errors also include `X-Favicon-Error-Code` from a fixed
+vocabulary: `invalid_parameters`, `source_forbidden`, `source_not_found`,
+`resource_limit`, `rate_limited`, `busy`, `timeout`, `upstream_failure`, or
+`generic`. The browser accepts only these codes and otherwise falls back to
+the HTTP status; it never reads an error response body for display.
 
 The application does not save source URLs or signatures to local storage,
 session storage or cookies, and does not add them to the page address. They
@@ -324,6 +348,15 @@ uses version-kit/v4 for build information, health-kit/v4 for lifecycle probes,
 logger-kit/v3 for structured logs and metrics-kit/v3 for its private Prometheus
 registry. These service integrations leave the image proxy's security and
 resource-limit chain in place.
+
+i18n-kit/v4 v4.0.3 provides a private translation bundle for the embedded UI.
+Resources are validated and templates rendered after help/version shortcuts and
+before caches or listeners are created. Global bundles and language variables
+are not changed. The application's bounded two-language negotiator excludes
+zero-quality and invalid quality preferences rather than using the kit's
+general-purpose detector. Only the standard-library-based root package is
+imported; Fiber and YAML adapters are not linked into this program even though
+their modules appear in i18n-kit's own dependency declarations.
 
 vfs-kit v1.4.6 provides the request-local in-memory file tree and ZIP writer.
 It has no third-party dependencies. A separate memfs-kit dependency is

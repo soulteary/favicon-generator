@@ -49,6 +49,8 @@ github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd h1:CmH9+J6ZSsIjUK
 github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd/go.mod h1:hPqNNc0+uJM6H+SuU8sEs5K5IQeKccPqeSjfgcKGgPk=
 github.com/soulteary/health-kit/v4 v4.0.3 h1:hqr4VVq+dxgiDSyQJMtK4zgZyIPu8YfRyPsEGER4eOI=
 github.com/soulteary/health-kit/v4 v4.0.3/go.mod h1:H8oo+OeAarz41ZPFShmUCVJ0BvE4uK9tIiCDFmu7lSI=
+github.com/soulteary/i18n-kit/v4 v4.0.3 h1:2nqGDjHUCuT5/LjjBXHdl9wmvmw1Uw1zQzZ5kGaOnX8=
+github.com/soulteary/i18n-kit/v4 v4.0.3/go.mod h1:Jp7V8qE9R+xPxB8KpcudYkqujBVcOR81/7Cly4tL4Fo=
 github.com/soulteary/logger-kit/v3 v3.0.3 h1:DG6qmf031sKT0Lv7bpl4PY3/fElsphdj2NWW/HQYfEI=
 github.com/soulteary/logger-kit/v3 v3.0.3/go.mod h1:PQr0IXuoQ2hhVK6a3Nc9fJjxXZikSIqYTQAF8QAq+D8=
 github.com/soulteary/metrics-kit/v3 v3.0.3 h1:a/Ug4MIQ79MfwMgNQCEn7JZ8sdbToVSGukwUi2qcB24=

@@ -36,6 +36,12 @@ const uiContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-sr
 // BaseURL fallback, without ServeMux's source-URL path canonicalization.
 func serveUI(w http.ResponseWriter, r *http.Request) bool {
 	asset, found := uiAssets[r.URL.Path]
+	localeAsset := ""
+	for _, locale := range uiLocaleNames {
+		if r.URL.Path == "/assets/locales/"+locale+".json" {
+			localeAsset, found = locale, true
+		}
+	}
 	if !found && r.URL.Path != "/assets" && !strings.HasPrefix(r.URL.Path, "/assets/") {
 		return false
 	}
@@ -56,6 +62,26 @@ func serveUI(w http.ResponseWriter, r *http.Request) bool {
 	if !found {
 		http.NotFound(w, r)
 		return true
+	}
+	if r.URL.Path == "/" || localeAsset != "" {
+		translations, err := loadUITranslations()
+		if err != nil {
+			http.Error(w, "UI unavailable", http.StatusInternalServerError)
+			return true
+		}
+		if localeAsset != "" {
+			asset = uiAsset{translations.json[localeAsset], "application/json; charset=utf-8"}
+			w.Header().Set("Content-Language", localeAsset)
+		} else {
+			w.Header().Add("Vary", "Accept-Language")
+			locale, err := uiRequestLocale(r)
+			if err != nil {
+				http.Error(w, "invalid UI language", http.StatusBadRequest)
+				return true
+			}
+			asset.content = translations.pages[locale]
+			w.Header().Set("Content-Language", locale)
+		}
 	}
 	w.Header().Set("Content-Type", asset.contentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(asset.content)))
