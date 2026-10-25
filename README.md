@@ -325,10 +325,13 @@ logger-kit/v3 for structured logs and metrics-kit/v3 for its private Prometheus
 registry. These service integrations leave the image proxy's security and
 resource-limit chain in place.
 
-vfs-kit v1.4.6 provides the request-local in-memory file tree and ZIP writer.
-It has no third-party dependencies. A separate memfs-kit dependency is
-unnecessary for this packaging path; cache capacity and TTL continue to be
-managed by the existing LRU.
+memfs-kit v1.1.1 stages the eight fixed icon-package files in a separate
+in-memory filesystem for each request. Its WriteFile copies input bytes and
+open handles retain their snapshots. A project-owned read-only bridge supplies
+fixed permissions and timestamps to the vfs-kit v1.4.6 ZIP writer, preserving
+reproducible archives without disk files or hooks. Both libraries have no
+third-party dependencies. Source-byte, ZIP-output and cancellation limits stay
+in the image pipeline; cache capacity and TTL remain managed by the existing LRU.
 
 The local `replace` directives for these two forks have no replacement version
 metadata, so they are not fully covered by vulnerability version matching. A passing

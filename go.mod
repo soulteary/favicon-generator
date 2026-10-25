@@ -11,6 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/soulteary/health-kit/v4 v4.0.3
 	github.com/soulteary/logger-kit/v3 v3.0.3
+	github.com/soulteary/memfs-kit v1.1.1
 	github.com/soulteary/metrics-kit/v3 v3.0.3
 	github.com/soulteary/version-kit/v4 v4.0.2
 	github.com/soulteary/vfs-kit v1.4.6
