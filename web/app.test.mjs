@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { ICONS, buildIconURL, createApp, messageForStatus, validateInput } from "./app.js";
+import { ICONS, bootstrap, createTranslator, applyTranslations, buildIconURL, createApp, messageForStatus as rawMessageForStatus, validateInput as rawValidateInput } from "./app.js";
+
+const catalogs = Object.fromEntries(["zh-CN", "en"].map((locale) => [locale, JSON.parse(readFileSync(new URL(`./locales/${locale}.json`, import.meta.url), "utf8"))]));
+const zh = createTranslator(catalogs["zh-CN"]);
+const validateInput = (input) => rawValidateInput(input, zh);
+const messageForStatus = (status) => rawMessageForStatus(status, zh);
 
 const sizes = [16, 32, 48, 180, 192, 512];
 const source = "https://origin.test/a%2fb.png?token=a%2Bb&slash=%2f&padding=x%3D%3D";
@@ -91,6 +96,9 @@ class Document {
   constructor() {
     this.elements = new Map();
     this.downloads = [];
+    this.documentElement = { lang: "zh-CN" };
+    this.add("language-select", "select").value = "zh-CN";
+    this.add("catalog-error-message").textContent = catalogs["zh-CN"]["error.catalog"];
     this.body = new Element(this, "body");
     const form = this.add("icon-form", "form");
     for (const id of ["source-url", "source-signature", "app-name", "app-short-name"]) form.appendChild(this.add(id, "input"));
@@ -113,6 +121,10 @@ class Document {
   getElementById(id) { return this.elements.get(id) ?? null; }
   querySelector(selector) { return selector.startsWith("#") ? this.getElementById(selector.slice(1)) : null; }
   createElement(tagName) { return new Element(this, tagName); }
+  querySelectorAll(selector) {
+    const match = selector.match(/^\[([^\]]+)\]$/);
+    return match ? [...this.elements.values()].filter((node) => node.getAttribute(match[1]) !== null) : [];
+  }
 }
 
 async function tick() { await new Promise((resolve) => setImmediate(resolve)); }
@@ -125,8 +137,9 @@ async function until(predicate, message) {
   assert.ok(predicate(), message);
 }
 
-function fixture(mount = true) {
+function fixture(mount = true, locale = "zh-CN") {
   const document = new Document();
+  document.documentElement.lang = locale;
   document.getElementById("source-url").value = source;
   document.getElementById("source-signature").value = signature;
   document.getElementById("app-name").value = " 测试应用 🙂 ";
@@ -140,16 +153,17 @@ function fixture(mount = true) {
     maxActive = Math.max(maxActive, active);
     calls.push(call);
     return new Promise((resolve, reject) => {
-      call.resolve = (status = 200, payload = call.url, type = "image/png") => {
+      call.resolve = (status = 200, payload = call.url, type = "image/png", headers = {}) => {
         assert.equal(call.settled, false, "fetch resolved twice");
         call.settled = true;
         active--;
         resolve({
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(headers),
           blob: async () => { call.bodyReads++; return new Blob([payload], { type }); },
           text: async () => { call.bodyReads++; return "SECRET upstream response https://private.test/token"; },
-          json: async () => { call.bodyReads++; return { message: "SECRET upstream response" }; },
+          json: async () => { call.bodyReads++; return typeof payload === "string" ? JSON.parse(payload) : payload; },
         });
       };
       call.reject = (error) => {
@@ -171,7 +185,7 @@ function fixture(mount = true) {
     },
     revokeObjectURL(value) { revoked.push(value); },
   };
-  const dependencies = { document, fetch, URL, AbortController, setTimeout: (fn) => { timers.push(fn); return timers.length; } };
+  const dependencies = { document, fetch, URL, AbortController, locale, catalogs, translate: createTranslator(catalogs[locale]), setTimeout: (fn) => { timers.push(fn); return timers.length; } };
   const app = mount ? createApp(dependencies) : null;
   return {
     app, dependencies, document, calls, created, revoked, timers,
@@ -476,21 +490,157 @@ test("browser pagehide cancels and releases previews while BFCache restoration r
   assert.equal(typeof listeners.get("pagehide"), "function");
   const hide = () => listeners.get("pagehide")({ persisted: true });
   t.after(hide);
+  await until(() => f.calls.length === 1, "Chinese catalog did not load");
+  f.calls[0].resolve(200, catalogs["zh-CN"], "application/json");
+  await until(() => f.calls.length === 2, "English catalog did not load");
+  f.calls[1].resolve(200, catalogs.en, "application/json");
+  await until(() => f.node("icon-form").listeners.get("submit")?.length === 1, "browser bootstrap did not bind the form");
   void f.submit();
-  await until(() => f.calls.length === 1, "browser bootstrap did not bind the form");
-  f.calls[0].resolve(200, "before pagehide");
-  await until(() => f.calls.length === 2, "browser preview did not advance");
+  await until(() => f.calls.length === 3, "browser preview did not start");
+  f.calls[2].resolve(200, "before pagehide");
+  await until(() => f.calls.length === 4, "browser preview did not advance");
   const first = f.node("image-16").src;
   hide();
-  assert.equal(f.calls[1].init.signal.aborted, true);
+  assert.equal(f.calls[3].init.signal.aborted, true);
   assert.ok(f.revoked.includes(first));
   assert.equal(f.node("download-button").disabled, true);
-  f.calls[1].resolve(200, "late hidden page response");
+  f.calls[3].resolve(200, "late hidden page response");
   await tick();
   assert.equal(f.node("image-32").src, "");
   // A persisted page restores its existing listeners instead of booting again.
   void f.submit();
-  await finishPreview(f, 2, "after BFCache restoration");
+  await finishPreview(f, 4, "after BFCache restoration");
   hide();
   for (const value of f.created.keys()) assert.ok(f.revoked.includes(value));
+});
+
+test("catalogs have matching keys and placeholders, including all static and dynamic messages", () => {
+  const keys = Object.keys(catalogs["zh-CN"]).sort();
+  assert.deepEqual(Object.keys(catalogs.en).sort(), keys);
+  for (const key of keys) {
+    const parameters = (text) => [...text.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((match) => match[1]).sort();
+    assert.deepEqual(parameters(catalogs.en[key]), parameters(catalogs["zh-CN"][key]), key);
+  }
+  const source = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  for (const match of [...source.matchAll(/"((?:status|action|preview|validation|form|error)\.[a-zA-Z_]+(?:\.[a-zA-Z_]+)?)"/g), ...html.matchAll(/\{\{t "([^"]+)"\}\}/g)]) {
+    assert.ok(keys.includes(match[1]), `missing ${match[1]}`);
+  }
+  assert.equal(createTranslator(catalogs.en)("status.progress", { current: 2, total: 6 }), "Generating previews (2/6)…");
+});
+
+test("both languages run real preview and download flows without changing signed source bytes", async (t) => {
+  for (const locale of ["zh-CN", "en"]) {
+    const f = fixture(true, locale);
+    t.after(() => f.app.destroy());
+    void f.submit();
+    await finishPreview(f);
+    assert.equal(f.node("status-message").textContent, catalogs[locale]["status.ready"]);
+    assert.equal(f.node("generate-button").textContent, catalogs[locale]["action.generate"]);
+    void f.node("download-button").click();
+    await until(() => f.calls.length === 7, "ZIP did not start");
+    const query = new URL(f.calls[6].url, "https://generator.test").searchParams;
+    assert.equal(query.get("url"), source);
+    assert.equal(query.get("s"), signature);
+    assert.equal(query.has("lang"), false);
+    f.calls[6].resolve(200, "ZIP", "application/zip");
+    await until(() => f.document.downloads.length === 1, "ZIP did not download");
+    assert.equal(f.node("status-message").textContent, catalogs[locale]["status.downloaded"]);
+  }
+});
+
+test("language switching translates text and ARIA safely and cancels stale work", async (t) => {
+  const f = fixture();
+  t.after(() => f.app.destroy());
+  const title = f.document.add("page-title");
+  title.setAttribute("data-i18n", "intro.title");
+  f.node("image-16").setAttribute("data-i18n-alt", "icon.16.alt");
+  const home = f.document.add("home", "a");
+  home.setAttribute("data-i18n-aria-label", "brand.home");
+  void f.submit();
+  await until(() => f.calls.length === 1);
+  f.calls[0].resolve();
+  await until(() => f.calls.length === 2);
+  const oldBlob = f.node("image-16").src;
+  f.node("language-select").value = "en";
+  await f.node("language-select").emit("change");
+  assert.equal(f.calls[1].init.signal.aborted, true);
+  assert.ok(f.revoked.includes(oldBlob));
+  assert.equal(f.document.documentElement.lang, "en");
+  assert.equal(title.textContent, catalogs.en["intro.title"]);
+  assert.equal(home.getAttribute("aria-label"), catalogs.en["brand.home"]);
+  assert.equal(f.node("image-16").getAttribute("alt"), catalogs.en["icon.16.alt"]);
+  assert.equal(f.node("source-url").value, source);
+  assert.equal(f.node("source-signature").value, signature);
+  assert.equal(f.node("download-button").disabled, true);
+  f.calls[1].resolve(200, "late Chinese response");
+  await tick();
+  assert.equal(f.node("image-32").src, "");
+  for (const size of sizes) assert.equal(f.node(`state-${size}`).textContent, catalogs.en["preview.pending"]);
+  const literal = '<img src=x onerror="SECRET">';
+  applyTranslations(f.document, createTranslator({ ...catalogs.en, "intro.title": literal }), "en");
+  assert.equal(title.textContent, literal);
+  void f.submit();
+  await finishPreview(f, 2);
+  assert.equal(f.node("status-message").textContent, catalogs.en["status.ready"]);
+});
+
+test("fixed error-code headers localize without reading error bodies or trusting unknown codes", async (t) => {
+  for (const locale of ["zh-CN", "en"]) {
+    for (const code of ["resource_limit", "SECRET_UPSTREAM_URL"]) {
+      const f = fixture(true, locale);
+      t.after(() => f.app.destroy());
+      void f.submit();
+      await until(() => f.calls.length === 1);
+      f.calls[0].resolve(403, "SECRET body", "text/plain", { "X-Favicon-Error-Code": code });
+      await until(() => !f.node("generate-button").disabled);
+      const expected = code === "resource_limit" ? "error.resource_limit" : "error.source_forbidden";
+      assert.equal(f.node("status-message").textContent, catalogs[locale][expected]);
+      assert.equal(f.calls[0].bodyReads, 0);
+    }
+    assert.throws(() => rawValidateInput({ url: "javascript:SECRET" }, createTranslator(catalogs[locale])), (error) => error.code === "validation.url_policy" && !error.message.includes("SECRET"));
+  }
+});
+
+test("bootstrap loads only fixed same-origin catalogs and never reads a failed resource body", async (t) => {
+  const f = fixture(false, "en");
+  const ready = bootstrap(f.dependencies);
+  await until(() => f.calls.length === 1);
+  assert.equal(f.calls[0].url, "/assets/locales/zh-CN.json");
+  f.calls[0].resolve(200, catalogs["zh-CN"]);
+  await until(() => f.calls.length === 2);
+  assert.equal(f.calls[1].url, "/assets/locales/en.json");
+  f.calls[1].resolve(200, catalogs.en);
+  const app = await ready;
+  t.after(() => app.destroy());
+  assert.equal(f.node("generate-button").textContent, catalogs.en["action.generate"]);
+  for (const call of f.calls) {
+    assert.equal(call.init.mode, "same-origin");
+    assert.equal(call.init.redirect, "error");
+    assert.equal(call.url.includes(source), false);
+    assert.equal(call.url.includes(signature), false);
+  }
+  const failed = fixture(false);
+  const failure = bootstrap(failed.dependencies);
+  failed.calls[0].resolve(500, "SECRET", "text/plain");
+  await assert.rejects(failure);
+  assert.equal(failed.calls[0].bodyReads, 0);
+  assert.equal(failed.calls.length, 1);
+});
+
+test("canceling a pending catalog body prevents later catalog requests and form binding", async () => {
+  const f = fixture(false);
+  const request = new AbortController();
+  let finishJSON;
+  let calls = 0;
+  const loading = bootstrap({ ...f.dependencies, signal: request.signal, fetch: async () => {
+    calls++;
+    return { ok: true, json: () => new Promise((resolve) => { finishJSON = resolve; }) };
+  } });
+  await until(() => !!finishJSON);
+  request.abort();
+  finishJSON(catalogs["zh-CN"]);
+  await assert.rejects(loading);
+  assert.equal(calls, 1);
+  assert.equal(f.node("icon-form").listeners.get("submit"), undefined);
 });

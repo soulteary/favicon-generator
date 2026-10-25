@@ -42,6 +42,9 @@ func run(ctx context.Context, args []string, lookupEnv func(string) (string, boo
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if _, err := loadUITranslations(); err != nil {
+		return err
+	}
 	level := cfg.LogLevel
 	if cfg.Verbose && level == "info" {
 		level = "debug"

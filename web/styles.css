@@ -33,6 +33,10 @@ button:focus-visible, input:focus-visible, a:focus-visible, summary:focus-visibl
 .brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px 12px 12px 3px; background: var(--accent); color: #fff; font: 700 27px/1 Georgia, serif; }
 .brand-subtitle { display: block; margin-top: 1px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .09em; }
 .header-note { color: var(--muted); font-size: 12px; letter-spacing: .08em; }
+.header-tools { display: flex; align-items: center; gap: 24px; }
+.language-picker { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12px; }
+.language-picker select { padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.language-picker select:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .intro { padding: 54px 0 32px; }
 .eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .12em; }
 h1 { margin: 0 0 18px; font-size: clamp(30px, 4.5vw, 46px); line-height: 1.35; letter-spacing: -.035em; font-weight: 680; }
@@ -100,6 +104,8 @@ h3 { margin: 0; font-size: 12px; font-weight: 600; }
   .page-shell { padding: 0 18px; }
   .site-header { min-height: 88px; }
   .header-note { display: none; }
+  .language-picker > span { display: none; }
+  .language-picker select { font-size: 16px; max-width: 120px; }
   .intro { padding: 35px 0 26px; }
   .mobile-break { display: inline; }
   .intro-copy { font-size: 12px; }
