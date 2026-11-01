@@ -12,11 +12,11 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/soulteary/cli-kit v1.9.2
 	github.com/soulteary/health-kit/v4 v4.0.4
-	github.com/soulteary/httpcache-kit/v4 v4.1.1
+	github.com/soulteary/httpcache-kit/v4 v4.1.2
 	github.com/soulteary/i18n-kit/v4 v4.0.3
-	github.com/soulteary/logger-kit/v3 v3.0.3
+	github.com/soulteary/logger-kit/v3 v3.0.4
 	github.com/soulteary/memfs-kit v1.1.1
-	github.com/soulteary/metrics-kit/v3 v3.0.3
+	github.com/soulteary/metrics-kit/v3 v3.0.4
 	github.com/soulteary/redis-kit v1.8.0
 	github.com/soulteary/version-kit/v4 v4.0.2
 	github.com/soulteary/vfs-kit v1.4.6
@@ -35,9 +35,10 @@ require (
 	github.com/muesli/smartcrop v0.3.1-0.20230316170055-f1935b108c21 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/common v0.72.1 // indirect
-	github.com/prometheus/procfs v0.22.0 // indirect
+	github.com/prometheus/common v0.73.1 // indirect
+	github.com/prometheus/procfs v0.23.0 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/willnorris/gifresize v1.0.0 // indirect
