@@ -8,7 +8,7 @@ Favicon.ico &amp; App Icon Generator.
 
 ## Run
 
-Requires Go 1.27.3 or later. Use the latest patch release of a supported Go
+Requires Go 1.27.4 or later. Use the latest patch release of a supported Go
 version for production builds.
 
 ```sh
@@ -351,7 +351,7 @@ transport.
 ./scripts/test.sh
 ```
 
-The script checks the installed Go toolchain and rejects versions below 1.27.3.
+The script checks the installed Go toolchain and rejects versions below 1.27.4.
 Automatic toolchain downloads and switching are disabled for these checks.
 It runs race-enabled tests, static checks and builds for all three modules:
 the root module, `pkg/willnorris/imageproxy` and `pkg/willnorris/gifresize`.
@@ -380,7 +380,7 @@ refetching while icon requests still repeat decoding and encoding.
 caches; warm artifacts retain source validation but skip rendering and packing. See [benchmark methodology and commands](docs/benchmarks.md). The script
 runs offline and CI runs a one-iteration smoke check without timing thresholds.
 
-GitHub Actions runs the same script on pushes and pull requests using Go 1.27.3
+GitHub Actions runs the same script on pushes and pull requests using Go 1.27.4
 and stable Go, plus a separate Node.js 24 frontend test job. The stable Go job
 also uses the pinned
 `govulncheck` v1.9.0 to check the actual main program and its reachable dependencies

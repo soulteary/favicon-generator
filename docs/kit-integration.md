@@ -65,7 +65,7 @@ peak memory. All warmup, cache resets, metric snapshots and counter assertions
 run outside benchmark timing.
 
 ```sh
-# Requires installed Go >=1.27.3 and pre-cached, checksum-verified dependencies.
+# Requires installed Go >=1.27.4 and pre-cached, checksum-verified dependencies.
 # The script defaults to both series and retains offline, readonly operation.
 BENCHTIME=1x BENCHCOUNT=1 ./scripts/benchmark.sh
 GOMAXPROCS=2 BENCHTIME=1s BENCHCOUNT=3 ./scripts/benchmark.sh

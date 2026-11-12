@@ -8,14 +8,14 @@ export GOTOOLCHAIN=local
 export GOWORK=off
 go_version="$(go env GOVERSION)"
 if [[ ! "$go_version" =~ ^go([0-9]+)\.([0-9]+)(\.([0-9]+)|(beta|rc)([0-9]+))?$ ]]; then
-  printf 'Go 1.27.3 or later is required (found %s).\n' "$go_version" >&2
+  printf 'Go 1.27.4 or later is required (found %s).\n' "$go_version" >&2
   exit 1
 fi
 major="${BASH_REMATCH[1]}"
 minor="${BASH_REMATCH[2]}"
 patch="${BASH_REMATCH[4]:-0}"
-if (( major < 1 || (major == 1 && (minor < 27 || (minor == 27 && patch < 3))) )); then
-  printf 'Go 1.27.3 or later is required (found %s).\n' "$go_version" >&2
+if (( major < 1 || (major == 1 && (minor < 27 || (minor == 27 && patch < 4))) )); then
+  printf 'Go 1.27.4 or later is required (found %s).\n' "$go_version" >&2
   exit 1
 fi
 
