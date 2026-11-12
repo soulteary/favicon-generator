@@ -39,7 +39,7 @@ while read -r version expected; do
     fi
   else
     output="$(cat "$test_dir/output")"
-    if [[ "$status" == 0 || -s "$test_dir/commands" || "$output" != *'Go 1.27.3 or later is required'* ]]; then
+    if [[ "$status" == 0 || -s "$test_dir/commands" || "$output" != *'Go 1.27.4 or later is required'* ]]; then
       printf 'Expected %s to be rejected before running any checks.\n' "$version" >&2
       cat "$test_dir/output" >&2
       exit 1
@@ -49,7 +49,7 @@ done <<'CASES'
 go1.26.9 reject
 go1.27.2 reject
 go1.27rc1 reject
-go1.27.3 accept
+go1.27.3 reject
 go1.27.4 accept
 go1.28.0 accept
 go1.28rc1 accept
