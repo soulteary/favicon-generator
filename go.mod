@@ -9,19 +9,19 @@ replace github.com/willnorris/gifresize => ./pkg/willnorris/gifresize
 require (
 	github.com/die-net/lrucache v0.0.0-20240714232319-26322ba4bc23
 	github.com/prometheus/client_golang v1.25.0
-	github.com/redis/go-redis/v9 v9.23.0
+	github.com/redis/go-redis/v9 v9.24.0
 	github.com/soulteary/cli-kit v1.9.4
-	github.com/soulteary/health-kit/v4 v4.0.7
-	github.com/soulteary/httpcache-kit/v4 v4.1.4
-	github.com/soulteary/i18n-kit/v4 v4.0.6
-	github.com/soulteary/logger-kit/v3 v3.0.6
+	github.com/soulteary/health-kit/v4 v4.0.9
+	github.com/soulteary/httpcache-kit/v4 v4.1.5
+	github.com/soulteary/i18n-kit/v4 v4.0.7
+	github.com/soulteary/logger-kit/v3 v3.0.7
 	github.com/soulteary/memfs-kit v1.1.2
-	github.com/soulteary/metrics-kit/v3 v3.0.6
-	github.com/soulteary/redis-kit v1.8.2
-	github.com/soulteary/version-kit/v4 v4.0.5
+	github.com/soulteary/metrics-kit/v3 v3.0.7
+	github.com/soulteary/redis-kit v1.8.4
+	github.com/soulteary/version-kit/v4 v4.0.6
 	github.com/soulteary/vfs-kit v1.4.7
 	github.com/willnorris/imageproxy v0.0.0
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 )
 
 require (
@@ -37,12 +37,12 @@ require (
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/common v0.73.1 // indirect
+	github.com/prometheus/common v0.74.0 // indirect
 	github.com/prometheus/procfs v0.23.0 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/willnorris/gifresize v1.0.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
