@@ -20,7 +20,7 @@ require (
 	github.com/soulteary/redis-kit v1.8.4
 	github.com/soulteary/version-kit/v4 v4.0.6
 	github.com/soulteary/vfs-kit v1.4.7
-	github.com/willnorris/imageproxy v0.13.0
+	github.com/willnorris/imageproxy v0.0.0
 	golang.org/x/image v0.48.0
 )
 
